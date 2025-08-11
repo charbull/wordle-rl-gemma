@@ -40,6 +40,6 @@
         "violated_clue_penalty": -50.0,
         "repetition_penalty": -20.0,
         "format_fail_penalty": -50.0,
-        "length_penalty_per_token": 0.03
+        "length_penalty_per_token": 0.03,
     }
 }

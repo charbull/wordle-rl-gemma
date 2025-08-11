@@ -224,24 +224,24 @@ def is_valid_guess(guess, allowed_words):
         and guess.upper() in {w.upper() for w in allowed_words}
     )
 
-def reward_for_entropy_proxy(guess: str, config: cfg.TrainerConfig) -> float:
-    """
-    Calculates a reward bonus based on heuristics that approximate high-entropy
-    guesses: unique letters and common letters.
-    """
-    if not guess or len(guess) != 5:
-        return 0.0
+# def reward_for_entropy_proxy(guess: str, config: cfg.TrainerConfig) -> float:
+#     """
+#     Calculates a reward bonus based on heuristics that approximate high-entropy
+#     guesses: unique letters and common letters.
+#     """
+#     if not guess or len(guess) != 5:
+#         return 0.0
 
-    # Bonus for number of unique letters
-    unique_letters = set(guess)
-    unique_bonus = (len(unique_letters) / 5.0) * config.reward.get("entropy_unique_letter_bonus", 2.0)
+#     # Bonus for number of unique letters
+#     unique_letters = set(guess)
+#     unique_bonus = (len(unique_letters) / 5.0) * config.reward.get("entropy_unique_letter_bonus")
 
-    # Bonus for using common letters, weighted by their frequency
-    common_letter_score = sum(NORMALIZED_LETTER_FREQS.get(letter, 0) for letter in unique_letters)
-    # Normalize by a typical score for a 5-unique-letter word to keep the bonus in a stable range
-    common_bonus = (common_letter_score / 3.5) * config.reward.get("entropy_common_letter_bonus", 3.0)
+#     # Bonus for using common letters, weighted by their frequency
+#     common_letter_score = sum(NORMALIZED_LETTER_FREQS.get(letter, 0) for letter in unique_letters)
+#     # Normalize by a typical score for a 5-unique-letter word to keep the bonus in a stable range
+#     common_bonus = (common_letter_score / 3.5) * config.reward.get("entropy_common_letter_bonus")
     
-    return unique_bonus + common_bonus
+#     return unique_bonus + common_bonus
 
 def calculate_total_reward(
     response: str,
@@ -309,9 +309,10 @@ def calculate_total_reward(
     # It tells the model "Okay, that was a valid move, now try to win."
     base_reward =  config.reward.get("valid_guess_base")
 
-    entropy_bonus = reward_for_entropy_proxy(guess, config)
+    # entropy_bonus = reward_for_entropy_proxy(guess, config)
 
-    return base_reward + entropy_bonus
+    # return base_reward + entropy_bonus
+    return base_reward
 
 
 def format_prompt_for_model(past_feedback: List[GuessFeedback], system_prompt: str) -> List[dict]:
