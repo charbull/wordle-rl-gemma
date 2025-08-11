@@ -21,18 +21,35 @@ from utils.rewards_wordle import play_wordle_game
 from tensorboardX import SummaryWriter
 
 # ==============================================================================
-# ---  HELPER FUNCTIONS (These remain the same) ---
+# ---  HELPER FUNCTIONS ---
 # ==============================================================================
-def plot_training_eval(timestamp, train_steps, train_losses, eval_steps, eval_rewards):
-    """Generates and saves a plot of training loss and evaluation rewards."""
-    plt.figure(figsize=(12, 6))
-    plt.plot(train_steps, train_losses, label="Training Loss")
-    plt.plot(eval_steps, eval_rewards, label="Evaluation Reward", marker='o', linestyle='--')
-    plt.xlabel("Training Steps")
-    plt.ylabel("Value (Loss or Reward)")
-    plt.title("Training Loss and Evaluation Reward Curves at " + timestamp)
-    plt.legend()
-    plt.grid(True)
+def plot_training_curves(
+    timestamp: str,
+    train_steps: List[int],
+    train_losses: List[float],
+    train_avg_rewards: List[float],
+    eval_steps: List[int],
+    eval_win_rates: List[float]
+):
+    """Generates and saves a plot with training and evaluation curves."""
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10), sharex=True)
+    
+    # Panel 1: Training Loss
+    ax1.plot(train_steps, train_losses, label="Training Loss", color='tab:blue')
+    ax1.set_ylabel("Loss")
+    ax1.legend(loc='upper left')
+    ax1.grid(True)
+    ax1.set_title(f"Training and Evaluation Curves ({timestamp})")
+
+    # Panel 2: Rewards and Win Rate
+    ax2.plot(train_steps, train_avg_rewards, label="Avg. Training Reward", color='tab:green')
+    ax2.plot(eval_steps, eval_win_rates, label="Eval Win Rate (%)", color='tab:red', marker='o', linestyle='--')
+    ax2.set_xlabel("Training Steps")
+    ax2.set_ylabel("Reward / Win Rate (%)")
+    ax2.legend(loc='upper left')
+    ax2.grid(True)
+
+    plt.tight_layout()
     plot_filename = f"training_curves_{timestamp}.png"
     plt.savefig(plot_filename)
     print(f"Training curve plot saved to {plot_filename}")
@@ -276,8 +293,8 @@ def train(config: cfg.TrainerConfig, system_prompt: str):
     test_dataset = shuffled_dataset.select(range(num_train_samples, len(shuffled_dataset)))
 
     loss_and_grad_fn = mx.value_and_grad(grpo_loss_and_grad, argnums=0)
-    train_steps, train_losses = [], []
-    eval_steps, eval_rewards = [], []
+    train_steps, train_losses, train_avg_rewards = [], [], []
+    eval_steps, eval_win_rates = [], []
 
     print("\nStarting GRPO training...")
     step_counter = 0
@@ -294,10 +311,12 @@ def train(config: cfg.TrainerConfig, system_prompt: str):
         
         win_tracker.append(1 if game_rollout.solved else 0)
         rolling_win_rate = (sum(win_tracker) / len(win_tracker)) * 100 if win_tracker else 0.0
-
         if not game_rollout.attempts:
             pbar.update(1)
             continue
+
+        all_rewards = [att.reward for att in game_rollout.attempts]
+        avg_reward_this_step = sum(all_rewards) / len(all_rewards) if all_rewards else 0.0
 
         grouped_attempts = defaultdict(list)
         for attempt in game_rollout.attempts:
@@ -370,14 +389,20 @@ def train(config: cfg.TrainerConfig, system_prompt: str):
 
         step_counter += 1
         pbar.update(1)
-        pbar.set_postfix({"avg_loss": f"{avg_loss:.4f}", "win rate": f"{rolling_win_rate:.1f}%"})
+        pbar.set_postfix({
+            "avg_loss": f"{avg_loss:.4f}", 
+            "avg_reward": f"{avg_reward_this_step:.4f}",
+            "win rate": f"{rolling_win_rate:.1f}%"
+        })
 
         # --- LOGGING, EVALUATION, AND CHECKPOINTING ---
         if step_counter > 0 and step_counter % config.training.log_steps == 0:
-            print(f"\nStep {step_counter:04d} | Avg Train Loss: {avg_loss:.4f}")
+            print(f"\nStep {step_counter:04d} | Avg Train Loss: {avg_loss:.4f} | Avg Train Reward: {avg_reward_this_step:.4f}")
             train_steps.append(step_counter)
             train_losses.append(avg_loss)
+            train_avg_rewards.append(avg_reward_this_step)
             writer.add_scalar('Loss/train', avg_loss, step_counter)
+            writer.add_scalar('Reward/train_avg', avg_reward_this_step, step_counter)
 
         if step_counter > 0 and step_counter % config.evaluation.steps == 0:
             eval_metrics = evaluate(policy_model, tokenizer, test_dataset, config, system_prompt)
@@ -385,8 +410,9 @@ def train(config: cfg.TrainerConfig, system_prompt: str):
             print(f"\n--- Evaluation at Step {step_counter:04d} ---")
             print(f"Win Rate: {win_rate:.2f}% | Avg. Turns on Win: {eval_metrics['avg_turns_on_win']:.2f}")
             eval_steps.append(step_counter)
-            eval_rewards.append(eval_metrics['win_rate'])
+            eval_win_rates.append(win_rate) # Changed from eval_rewards to be more specific
             writer.add_scalar('Evaluation/win_rate', win_rate, step_counter)
+            writer.add_scalar('Evaluation/avg_turns_on_win', eval_metrics['avg_turns_on_win'], step_counter)
 
         # NB: There is no reference model update in GRPO/DPO
         
@@ -398,5 +424,12 @@ def train(config: cfg.TrainerConfig, system_prompt: str):
     print("\n--- Training Finished ---")
     lora.save_checkpoint(policy_model, adapter_path.stem, "final", timestamp)
     writer.close()
-    plot_training_eval(timestamp, train_steps, train_losses, eval_steps, eval_rewards)
+    plot_training_curves(
+        timestamp, 
+        train_steps, 
+        train_losses, 
+        train_avg_rewards, 
+        eval_steps, 
+        eval_win_rates
+    )
     print("Done.")
