@@ -316,19 +316,65 @@ def calculate_total_reward(
 
 
 def format_prompt_for_model(past_feedback: List[GuessFeedback], system_prompt: str) -> List[dict]:
-    """Formats the history of guesses into a message list for the model."""
+    """
+    Formats the history of guesses into a message list for the model.
+    This version includes a "constructive reminder" after an error to re-orient the model.
+    """
     if not past_feedback:
         user_content = "This is the first turn. Please provide your best starting word."
-    else:
-        prompt_parts = ["**Clues so far:**"]
-        for i, fb in enumerate(past_feedback):
-            if fb.guess in ["INVALID_FORMAT", "INVALID_LENGTH", "REPEATED_GUESS", "WORD_NOT_IN_LIST"]:
-                prompt_parts.append(f"* Attempt {i+1} Error: {fb.feedback}")
-            else:
-                feedback_str = " ".join([f"{fb.guess[j]}({f})" for j, f in enumerate(fb.feedback.split())])
-                prompt_parts.append(f"* Guess {i+1}: {fb.guess} \u2192 {feedback_str}")
-        user_content = "\n".join(prompt_parts)
-        print("debug:: user content: ", user_content)
+        return [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_content}]
+
+    prompt_parts = ["**Clues so far:**"]
+    
+    # --- State tracking for the reminder ---
+    known_green = {}  # {index: letter}
+    known_yellow = set()
+    known_gray = set()
+    
+    for i, fb in enumerate(past_feedback):
+        # Always update the state from valid past guesses
+        if fb.guess not in ["INVALID_FORMAT", "REPEATED_GUESS", "WORD_NOT_IN_LIST"]:
+            feedback_parts = fb.feedback.split()
+            # Reconstruct and display the feedback line
+            feedback_str = " ".join([f"{fb.guess[j]}({f})" for j, f in enumerate(feedback_parts)])
+            prompt_parts.append(f"* Guess {i+1}: {fb.guess} \u2192 {feedback_str}")
+            
+            # Update our knowledge base
+            temp_yellows = set()
+            for j, f_char in enumerate(feedback_parts):
+                letter = fb.guess[j]
+                if f_char == '✓':
+                    known_green[j] = letter
+                elif f_char == '-':
+                    temp_yellows.add(letter)
+                else:
+                    known_gray.add(letter)
+            # Add yellows, but remove any that are now confirmed green
+            known_yellow.update(temp_yellows)
+            known_yellow = known_yellow - set(known_green.values())
+
+        else: # This is an error feedback line
+            prompt_parts.append(f"* Attempt {i+1} Error: {fb.feedback}")
+            
+            # --- Add the new constructive reminder ---
+            reminder = ["\n**Hint:** Let's re-evaluate the clues."]
+            
+            # 1. Show the green letters
+            green_mask = ['_'] * 5
+            for idx, letter in known_green.items():
+                green_mask[idx] = letter
+            reminder.append(f"* The word has the form: `{' '.join(green_mask)}`")
+            
+            # 2. Show the yellow letters
+            if known_yellow:
+                reminder.append(f"* It must contain the letter(s): `{', '.join(sorted(list(known_yellow)))}`")
+                
+            # 3. Remind about the dictionary
+            reminder.append("* Your guess must be a valid 5-letter word from the official dictionary.")
+            prompt_parts.append("\n".join(reminder))
+
+    user_content = "\n".join(prompt_parts)
+    print("DEBUG: clues so far: ", user_content)
     return [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_content}]
 
 def _reconstruct_past_feedback(messages: list, secret_word: str) -> List[GuessFeedback]:
@@ -367,147 +413,93 @@ def play_wordle_game(
     initial_history: list = None
 ) -> GameRollout:
     """
-    Plays a game of Wordle using a self-contained reward system that does not
-    require an external valid word list. This version includes heuristic
-    re-ranking to make smarter guess selections.
+    Plays a game of Wordle using a self-contained reward system.
+    This version contains fixes for more precise and helpful feedback.
     """
     game_rollout = GameRollout(secret_word=secret_word)
     past_feedback: List[GuessFeedback] = []
-    already_guessed_words = set() #
-    # Maximum number of attempts allowed in a game
+    already_guessed_words = set()
     max_trials = config.rl.max_trials
-    # Number of parallel generations to sample per turn
     num_generations = config.rl.num_generations
-    total_rewards = []
 
     if initial_history:
-        # Use the helper to convert the dataset's message history into our internal format
         past_feedback = _reconstruct_past_feedback(initial_history, secret_word)
-        
-        # Populate the set of already guessed words from the reconstructed history
         for fb in past_feedback:
-            already_guessed_words.add(fb.guess)
-
-        # OPTIONAL: Check if the game was already solved in the provided history
+            # Only add valid past guesses to the already_guessed_words set
+            if fb.guess not in ["INVALID_FORMAT", "REPEATED_GUESS", "WORD_NOT_IN_LIST"]:
+                 already_guessed_words.add(fb.guess)
         if any(fb.guess == secret_word.upper() for fb in past_feedback):
-             print(f"INFO: Game for '{secret_word}' already solved in initial_history. Skipping RL rollout.")
-             # Returning here means we won't generate new attempts for already-solved games.
-             # This is efficient as there's nothing new to learn.
              return game_rollout
 
-
     for attempt_num in range(len(past_feedback), max_trials):
-        # 1. Format the prompt based on the history of previous turns
         messages = format_prompt_for_model(past_feedback, system_prompt)
-
         prompt_string = tokenizer.apply_chat_template(
             messages, tokenize=False, add_generation_prompt=True)
         prompt_tokens = tokenizer.encode(prompt_string)
 
-        # 2. Generate N parallel responses for the current state
         generations = [
             generate(
                 model, tokenizer, prompt=prompt_string,
                 max_tokens=config.rl.max_completion_length, sampler=sampler, verbose=False
-            ).replace(prompt.SYSTEM_PROMPT, "").strip() for _ in range(num_generations)
+            ) for _ in range(num_generations)
         ]
 
-        # 3. Calculate rewards for each generation and create attempt objects
         current_turn_attempts: List[GenerationAttempt] = []
-        for i, response in enumerate(generations):
-            response = response.replace(prompt_string, "").strip()
-            print("debug model response: ", response)
-            print("secret word is: ", secret_word)
+        for response in generations:
+            response_only = response.replace(prompt_string, "").strip()
+            print("DEBUG: Response from model:", response_only)
+            guess = parse_guess(response_only)
+
             reward = calculate_total_reward(
-                response,
-                secret_word,
-                past_feedback,
-                config,
-                ALLOWED_GUESSES
-            ) 
-            # length_penalty_per_token = config.reward.get("length_penalty_per_token")
-            # num_tokens = len(tokenizer.encode(response))
-            # reward = main_reward - (length_penalty_per_token * num_tokens)
-            total_rewards.append(reward)
-            
-            guess = parse_guess(response)
-            print(f"debug: parsed guess: {guess}")
-            is_repeat = guess and (guess in already_guessed_words)
-            if not guess:
-                parsed_guess_state = "INVALID_FORMAT"
+                response_only, secret_word, past_feedback, config, ALLOWED_GUESSES
+            )
 
-            elif not is_valid_guess(guess, ALLOWED_GUESSES):
-                parsed_guess_state = "WORD_NOT_IN_LIST"
-
-            elif is_repeat:
-                parsed_guess_state = "REPEATED_GUESS"
-            else:
-                parsed_guess_state = guess
-
+            # Store the raw guess (e.g., "SHRED" or None)
             attempt = GenerationAttempt(
                 prompt_string=prompt_string,
                 prompt_tokens=prompt_tokens,
-                full_response=response,
-                response_tokens=tokenizer.encode(response),
-                parsed_guess=parsed_guess_state,
+                full_response=response_only,
+                response_tokens=tokenizer.encode(response_only),
+                parsed_guess=guess,
                 reward=reward,
-                feedback_given=None  # To be filled in after the best attempt is chosen
+                feedback_given=None
             )
             current_turn_attempts.append(attempt)
 
-        all_invalid = all(
-                att.parsed_guess in ["INVALID_FORMAT", "REPEATED_GUESS", "WORD_NOT_IN_LIST"]
-                for att in current_turn_attempts
-            )
-        if all_invalid:
-                print("All attempts invalid this turn. Ending game early.")
-                break
-        # Select the generation with the highest reward. The heuristic bonus has been removed
-        # to align the training objective with the action selection mechanism.
-        best_generation_idx = -1
-        max_reward = -float('inf')
-        
-        for i, attempt in enumerate(current_turn_attempts):
-            if attempt.reward > max_reward:
-                max_reward = attempt.reward
-                best_generation_idx = i
-
-        # 4. Use the best generation (chosen by max reward) to advance the game state
-        best_attempt = current_turn_attempts[best_generation_idx]
+        # Stop if no valid guesses could be parsed in any generation
+        if not any(att.parsed_guess for att in current_turn_attempts):
+            print("All attempts failed parsing. Ending game early.")
+            break
+            
+        # Select the generation with the highest reward to advance the game state
+        best_attempt = max(current_turn_attempts, key=lambda att: att.reward)
         best_guess = best_attempt.parsed_guess
 
-        # Add the played word to the set to check for future repetitions
-        if best_guess not in ["INVALID_FORMAT", "REPEATED_GUESS", "WORD_NOT_IN_LIST"]:
-            already_guessed_words.add(best_guess)
-
-        # 5. Generate specific feedback for the model's *next* turn based on the best attempt
-        if best_guess == "INVALID_FORMAT":
-            feedback = GuessFeedback(
-                "INVALID_FORMAT", "Your response did not contain a valid 5-letter guess in all-caps inside <guess> tags.")
-        elif best_guess == "REPEATED_GUESS":
-            feedback = GuessFeedback(
-                "REPEATED_GUESS", "You have already guessed that word. Try a different one.")
-        elif best_guess == "WORD_NOT_IN_LIST":
-            feedback = GuessFeedback(
-                "WORD_NOT_IN_LIST", 
-                f"Your guess '{best_attempt.parsed_guess}' is not in the official Wordle dictionary. Try another word." )
+        # Generate specific feedback for the model's *next* turn based on the best attempt
+        if not best_guess:
+            # This handles cases where the best-rewarded attempt was one with invalid format
+            feedback = GuessFeedback("INVALID_FORMAT", "Your response did not contain a valid 5-letter guess in all-caps inside <guess> tags.")
+        elif best_guess in already_guessed_words:
+            feedback = GuessFeedback("REPEATED_GUESS", f"You have already guessed the word '{best_guess}'. Try a different one.")
+        elif not is_valid_guess(best_guess, ALLOWED_GUESSES):
+            feedback = GuessFeedback("WORD_NOT_IN_LIST", f"Your guess '{best_guess}' is not in the official Wordle dictionary. Try another word.")
         else:
-            # The guess is a 5-letter word, get its official Wordle feedback
+            # The guess is a valid, 5-letter word not used before
             feedback = get_feedback(best_guess, secret_word)
+            already_guessed_words.add(best_guess)
 
         # Store the results of this turn
         best_attempt.feedback_given = feedback
-        game_rollout.attempts.extend(current_turn_attempts)
-        past_feedback.append(feedback)
+        game_rollout.attempts.extend(current_turn_attempts) # Add ALL attempts for the trainer
+        past_feedback.append(feedback) # Add only the feedback for the CHOSEN path to guide the next turn
 
-        # 6. Check for game termination
-        if best_guess == secret_word.upper():
-            print(
-                f"🎉 SUCCESS on attempt {attempt_num + 1}! Word: '{secret_word.upper()}'")
+        # Check for game termination
+        if best_guess and best_guess == secret_word.upper():
+            print(f"🎉 SUCCESS on attempt {attempt_num + 1}! Word: '{secret_word.upper()}'")
             game_rollout.solved = True
             break
 
     if not game_rollout.solved:
-        print(
-            f"❌ Did not guess '{secret_word.upper()}' in {max_trials} trials. guesses: {[fb.guess for fb in past_feedback]}")
+        print(f"❌ Did not guess '{secret_word.upper()}' in {max_trials} trials. Guesses: {[fb.guess for fb in past_feedback if fb.guess not in ['INVALID_FORMAT', 'REPEATED_GUESS', 'WORD_NOT_IN_LIST']]}")
+        
     return game_rollout

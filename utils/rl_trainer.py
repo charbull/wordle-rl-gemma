@@ -21,7 +21,7 @@ from utils.rewards_wordle import play_wordle_game
 from tensorboardX import SummaryWriter
 
 # ==============================================================================
-# ---  HELPER & REWARD FUNCTIONS ---
+# ---  HELPER FUNCTIONS (These remain the same) ---
 # ==============================================================================
 def plot_training_eval(timestamp, train_steps, train_losses, eval_steps, eval_rewards):
     """Generates and saves a plot of training loss and evaluation rewards."""
@@ -38,18 +38,10 @@ def plot_training_eval(timestamp, train_steps, train_losses, eval_steps, eval_re
     print(f"Training curve plot saved to {plot_filename}")
 
 def from_trainable_parameters(model_instance: nn.Module, trainable_params: dict):
-    """
-    A helper function to update a model with a dictionary of its trainable parameters.
-    """
-    # This correctly uses tree_unflatten for a dictionary.
     model_instance.update(tree_unflatten(list(trainable_params.items())))
     return model_instance
 
 def get_named_parameters_flat(model_params: dict, prefix: str = ''):
-    """
-    A robust helper function to recursively flatten a nested structure of parameters
-    and return a list of (name, value) pairs.
-    """
     flat_params = []
     for name, param in model_params.items():
         full_name = f"{prefix}.{name}" if prefix else name
@@ -63,9 +55,6 @@ def get_named_parameters_flat(model_params: dict, prefix: str = ''):
     return flat_params
 
 def pad_sequences(token_lists: List[List[int]], pad_value: int) -> mx.array:
-    """
-    Pads a list of token lists to the same length and returns an mx.array.
-    """
     if not token_lists:
         return mx.array([], dtype=mx.int32)
     max_len = max(len(tokens) for tokens in token_lists)
@@ -76,91 +65,78 @@ def is_nan_or_inf(x):
     return mx.isnan(x).any().item() or mx.isinf(x).any().item()
 
 # ==============================================================================
-# ---  LOSS FUNCTION ---
+# ---  LOSS FUNCTION (Completely replaced with GRPO/DPO loss) ---
 # ==============================================================================
-# In rl_trainer.py
-
-import mlx.nn as nn
-import mlx.core as mx
-
 def get_log_probs(model: nn.Module, input_ids: mx.array, output_ids: mx.array, pad_token_id: int) -> mx.array:
-    """
-    Calculates the total log probability of a model generating `output_ids` given `input_ids`.
-    
-    This function uses the fundamental definition: log(softmax) followed by gathering
-    the probabilities of the chosen tokens. It is numerically stabilized by using
-    the log_softmax function.
-
-    Args:
-        model: The language model (e.g., the policy model).
-        input_ids: A batch of tokenized prompts, shape (batch_size, prompt_len).
-        output_ids: A batch of tokenized generations, shape (batch_size, gen_len).
-        pad_token_id: The ID of the padding token to be ignored in the calculation.
-
-    Returns:
-        A 1D mx.array of shape (batch_size,) containing the total log probability
-        for each sequence in the batch.
-    """
     full_sequence = mx.concatenate([input_ids, output_ids], axis=1)
     logits = model(full_sequence)
     
     prompt_len = input_ids.shape[1]
     gen_len = output_ids.shape[1]
 
-    # Slice to get only the logits for the generated tokens
     output_logits = logits[:, prompt_len - 1:, :]
     
-    # Truncate if the model produces one extra logit
     if output_logits.shape[1] > gen_len:
         output_logits = output_logits[:, :gen_len, :]
 
     if output_logits.shape[1] != gen_len:
         raise ValueError(f"BUG: Logits shape after slicing ({output_logits.shape}) does not match generation shape ({output_ids.shape}).")
 
-    # Use the stable log_softmax function to get log probabilities for all possible tokens.
     log_probabilities_stable = nn.log_softmax(output_logits, axis=-1)
     
-    # Gather the log probabilities of only the specific tokens that were actually generated.
     chosen_token_log_probs = mx.take_along_axis(
         log_probabilities_stable, output_ids[..., None], axis=-1
     ).squeeze(-1)
     
-    # Create a mask to ignore padding tokens
     mask = (output_ids != pad_token_id).astype(chosen_token_log_probs.dtype)
     masked_log_probs = chosen_token_log_probs * mask
     
-    # The result is already a log probability, so we just sum it.
     total_log_prob = mx.sum(masked_log_probs, axis=-1)
     
     return total_log_prob
 
 def grpo_loss_and_grad(
     trainable_params: dict,
-    model_shell: nn.Module,
-    prompt_toks_padded: mx.array,
-    gen_toks_padded: mx.array,
-    advantages: mx.array,
-    log_probs_ref: mx.array,
+    policy_model_shell: nn.Module,
+    ref_model: nn.Module,
+    winner_toks: mx.array,
+    loser_toks: mx.array,
+    prompt_toks: mx.array,
     config: cfg.TrainerConfig,
     pad_token_id: int,
 ):
-    policy_model = model_shell.from_trainable_parameters(trainable_params)
-    log_probs_current = get_log_probs(policy_model, prompt_toks_padded, gen_toks_padded, pad_token_id)
-    log_ratios = log_probs_current - log_probs_ref
-    # clip log ratios to avoid extreme values
-    LOG_RATIO_CLIP = 4.0 
-    log_ratios = mx.clip(log_ratios, a_min=-LOG_RATIO_CLIP, a_max=LOG_RATIO_CLIP)
-    ratios = mx.exp(log_ratios)
-    unclipped_objective = ratios * advantages
-    clipped_objective = mx.clip(ratios, 1 - config.ppo.clip_epsilon, 1 + config.ppo.clip_epsilon) * advantages
-    ppo_objective = mx.minimum(unclipped_objective, clipped_objective)
-    ppo_loss = -mx.mean(ppo_objective)
-    kl_div = mx.mean(log_ratios)
-    loss = ppo_loss + config.ppo.kl_coeff * kl_div
+    """
+    Calculates the GRPO loss, which is structurally identical to the DPO loss.
+    Loss = -log_sigmoid(beta * (log_prob_diff_policy - log_prob_diff_ref))
+    """
+    # 1. Reconstruct the policy model with the current trainable parameters
+    policy_model = policy_model_shell.from_trainable_parameters(trainable_params)
+
+    # 2. Get log probabilities for winner and loser from the policy model
+    log_probs_policy_winner = get_log_probs(policy_model, prompt_toks, winner_toks, pad_token_id)
+    log_probs_policy_loser = get_log_probs(policy_model, prompt_toks, loser_toks, pad_token_id)
+
+    # 3. Get log probabilities from the frozen reference model (no gradients)
+    log_probs_ref_winner = get_log_probs(ref_model, prompt_toks, winner_toks, pad_token_id)
+    log_probs_ref_loser = get_log_probs(ref_model, prompt_toks, loser_toks, pad_token_id)
+
+    # 4. Calculate the log-probability differences (policy vs. reference)
+    pi_log_ratios = log_probs_policy_winner - log_probs_policy_loser
+    ref_log_ratios = log_probs_ref_winner - log_probs_ref_loser
+
+    # 5. The core of the DPO/GRPO loss
+    logits = pi_log_ratios - ref_log_ratios
+    grpo_loss = -mx.mean(nn.log_sigmoid(config.grpo.beta * logits))
+
+    # 6. Optional: Add a KL divergence penalty to stabilize training
+    # This penalizes the policy for moving too far from the reference on the "good" examples
+    kl_div = mx.mean(log_probs_policy_winner - log_probs_ref_winner)
+    
+    loss = grpo_loss + config.grpo.kl_coeff * kl_div
     return loss
 
 # ==============================================================================
-# --- EVALUATION FUNCTION ---
+# --- EVALUATION FUNCTION (This remains the same) ---
 # ==============================================================================
 def evaluate(
     model,
@@ -210,18 +186,6 @@ def evaluate(
     }
 
 def load_wordle_trajectories_from_jsonl(dataset_path: str) -> Dataset:
-    """
-    Loads Wordle game trajectories from a JSON Lines file.
-
-    Each line is a JSON object containing a 'secret' word and a 'messages'
-    list representing a partial or full game history.
-
-    Args:
-        dataset_path: The path to the .jsonl file.
-
-    Returns:
-        A Dataset object with 'secret' and 'messages' columns.
-    """
     print(f"Loading game trajectories from: {dataset_path}")
     game_trajectories = []
     try:
@@ -240,7 +204,6 @@ def load_wordle_trajectories_from_jsonl(dataset_path: str) -> Dataset:
                         })
     except FileNotFoundError:
         print(f"ERROR: Dataset file not found at '{dataset_path}'")
-        print("Cannot proceed without a dataset for this training type.")
         raise
     except json.JSONDecodeError as e:
         print(f"ERROR: Could not parse JSON from '{dataset_path}'. Error: {e}")
@@ -249,13 +212,12 @@ def load_wordle_trajectories_from_jsonl(dataset_path: str) -> Dataset:
     if not game_trajectories:
         raise ValueError("No game trajectories were loaded from the dataset.")
 
-    # Create a Dataset object from the list of dictionaries
     dataset = Dataset.from_list(game_trajectories)
     print(f"Successfully loaded {len(dataset)} game trajectories.")
     return dataset
 
 # ==============================================================================
-# --- MAIN TRAINING  ---
+# --- MAIN TRAINING ---
 # ==============================================================================
 def train(config: cfg.TrainerConfig, system_prompt: str):
     """Main training loop for the GRPO-based Wordle solver."""
@@ -269,46 +231,30 @@ def train(config: cfg.TrainerConfig, system_prompt: str):
     log_dir = f"runs/rl_wordle_{timestamp}"
     writer = SummaryWriter(log_dir)
     print(f"TensorBoard logs will be saved to: {log_dir}")
-    quantization_config = {"group_size": 64, "bits": 4}
-    model_config={"quantize": quantization_config}
     win_tracker = deque(maxlen=config.training.iterations)
 
-    if config.training.resume_from_checkpoint:
-        print(f"\n--- Resuming training from: {config.training.resume_from_checkpoint} ---")
-        policy_model, tokenizer = load(
-            path_or_hf_repo=config.model.name,
-            adapter_path=config.training.resume_from_checkpoint
-        )
-    else:
-        print(f"\n--- Starting training from scratch. ---")
-        policy_model, tokenizer = load(config.model.name, model_config)
-        print("Applying fresh LoRA layers to the model...")
-        lora_config = {"rank": config.lora.rank, "alpha": config.lora.alpha, "dropout": config.lora.dropout}
-        policy_model = lora.apply_lora_to_model(policy_model, lora_config, config.lora.layers_to_tune)
+    # In GRPO/DPO, the 'reference model' is a frozen copy of the original SFT model.
+    # It does NOT get updated during training.
+    print("Creating policy and reference models...")
+    policy_model, tokenizer = load(config.model.name)
+    ref_model, _ = load(config.model.name)
 
+    # Apply LoRA layers to the policy model, which will be trained.
+    lora_config = {"rank": config.lora.rank, "alpha": config.lora.alpha, "dropout": config.lora.dropout}
+    policy_model = lora.apply_lora_to_model(policy_model, lora_config, config.lora.layers_to_tune)
+    
+    if config.training.resume_from_checkpoint:
+        print(f"\n--- Resuming training, loading adapter: {config.training.resume_from_checkpoint} ---")
+        policy_model = lora.load_adapter(policy_model, config.training.resume_from_checkpoint)
+
+    # The reference model remains frozen without LoRA adapters.
+    ref_model.freeze()
     policy_model.from_trainable_parameters = from_trainable_parameters.__get__(policy_model, type(policy_model))
 
-    all_params_flat = tree_flatten(policy_model.parameters())
-    trainable_params = {
-        k: v for k, v in all_params_flat if "lora" in k
-    }
-#     trainable_params = {
-#     k: v for k, v in tree_flatten(policy_model.parameters()) if "lora" in k
-# }
+    trainable_params = { k: v for k, v in tree_flatten(policy_model.parameters()) if "lora" in k }
     if not trainable_params:
         raise ValueError("No trainable LoRA parameters found.")
     print(f"Found {len(trainable_params)} LoRA parameters to train.")
-
-    policy_model.freeze()
-    mx.eval(policy_model.parameters())
-
-    print("Creating reference model...")
-    ref_model, _ = load(config.model.name, model_config)
-    lora_config = {"rank": config.lora.rank, "alpha": config.lora.alpha, "dropout": config.lora.dropout}
-    ref_model = lora.apply_lora_to_model(ref_model, lora_config, config.lora.layers_to_tune)
-    ref_model.freeze()
-    ref_model.update(policy_model.parameters())
-    print("Reference model created and synchronized.")
 
     policy_model.train()
     optimizer = optim.AdamW(learning_rate=config.training.learning_rate)
@@ -321,28 +267,13 @@ def train(config: cfg.TrainerConfig, system_prompt: str):
         tokenizer.pad_token_id = tokenizer.eos_token_id
     pad_id = tokenizer.pad_token_id
 
-
-    print("Loading dataset: ", dataset_path)
-    # Call the new helper function to load the data from your custom file.
     dataset = load_wordle_trajectories_from_jsonl(dataset_path)
-
-    # The rest of the data processing remains the same
     shuffled_dataset = dataset.shuffle(seed=42)
     
-    # Split the data into training and testing sets
     train_percentage = 0.95
-    if len(shuffled_dataset) > 1:
-        num_train_samples = int(len(shuffled_dataset) * train_percentage)
-        train_dataset = shuffled_dataset.select(range(num_train_samples))
-        test_dataset = shuffled_dataset.select(range(num_train_samples, len(shuffled_dataset)))
-    else: # Handle cases with very small datasets
-        train_dataset = shuffled_dataset
-        test_dataset = shuffled_dataset
-
-
-    trainable_params = {
-        k: v for k, v in get_named_parameters_flat(policy_model.parameters()) if "lora" in k
-    }
+    num_train_samples = int(len(shuffled_dataset) * train_percentage)
+    train_dataset = shuffled_dataset.select(range(num_train_samples))
+    test_dataset = shuffled_dataset.select(range(num_train_samples, len(shuffled_dataset)))
 
     loss_and_grad_fn = mx.value_and_grad(grpo_loss_and_grad, argnums=0)
     train_steps, train_losses = [], []
@@ -350,34 +281,19 @@ def train(config: cfg.TrainerConfig, system_prompt: str):
 
     print("\nStarting GRPO training...")
     step_counter = 0
-    initial_temp = config.rl.sampling_temperature
-    min_temp = 0.4
-    sampler = make_sampler(temp=initial_temp)
+    sampler = make_sampler(temp=config.rl.sampling_temperature)
     data_iterator = iter(itertools.cycle(train_dataset))
     pbar = tqdm(total=config.training.iterations, desc="GRPO Training Steps")
 
     while step_counter < config.training.iterations:
         sample = next(data_iterator)
-        secret_word = sample['secret']
-        message_history = sample['messages']
-
-        current_temp = max(
-            min_temp,
-            initial_temp * (1 - step_counter/config.training.iterations)
-        )
-        sampler = make_sampler(temp=current_temp)
-
         game_rollout = play_wordle_game(
-            model=policy_model, tokenizer=tokenizer, secret_word=secret_word,
-            system_prompt=system_prompt, config=config, sampler=sampler, initial_history=message_history
+            model=policy_model, tokenizer=tokenizer, secret_word=sample['secret'],
+            system_prompt=system_prompt, config=config, sampler=sampler, initial_history=sample['messages']
         )
-        # win rate tracking
+        
         win_tracker.append(1 if game_rollout.solved else 0)
-        # Calculate the win rate over the recent window.
-        if len(win_tracker) > 0:
-            rolling_win_rate = (sum(win_tracker) / len(win_tracker)) * 100
-        else:
-            rolling_win_rate = 0.0
+        rolling_win_rate = (sum(win_tracker) / len(win_tracker)) * 100 if win_tracker else 0.0
 
         if not game_rollout.attempts:
             pbar.update(1)
@@ -387,100 +303,74 @@ def train(config: cfg.TrainerConfig, system_prompt: str):
         for attempt in game_rollout.attempts:
             grouped_attempts[attempt.prompt_string].append(attempt)
 
-        accumulated_grads_dict = {k: mx.zeros_like(v) for k, v in trainable_params.items()}
+        accumulated_grads = {k: mx.zeros_like(v) for k, v in trainable_params.items()}
         total_loss = 0.0
         num_micro_batches = 0
 
         for _, attempts_for_prompt in grouped_attempts.items():
-            if not attempts_for_prompt: continue
+            if len(attempts_for_prompt) < 2:
+                continue # Need at least one winner and one loser for a comparison
 
-            prompt_tok = mx.array(attempts_for_prompt[0].prompt_tokens).reshape(1, -1)
-            list_of_gen_tokens = [att.response_tokens for att in attempts_for_prompt]
-            gen_toks_padded = pad_sequences(list_of_gen_tokens, pad_id)
-            prompt_toks_padded = mx.repeat(prompt_tok, repeats=len(gen_toks_padded), axis=0)
+            winner = max(attempts_for_prompt, key=lambda att: att.reward)
+            
+            # Create all (winner, loser) pairs for this prompt
+            winner_toks_list, loser_toks_list, prompt_toks_list = [], [], []
+            for loser in attempts_for_prompt:
+                if loser is not winner:
+                    winner_toks_list.append(winner.response_tokens)
+                    loser_toks_list.append(loser.response_tokens)
+                    prompt_toks_list.append(winner.prompt_tokens)
+            
+            if not loser_toks_list:
+                continue
 
-            if len(attempts_for_prompt) > 1:
-                rewards = mx.array([att.reward for att in attempts_for_prompt])
-                rewards = rewards + mx.random.normal(rewards.shape) * 1e-5
-                advantages = rewards - mx.mean(rewards)
-                if mx.std(advantages) > 1e-6:
-                    advantages = (advantages - mx.mean(advantages)) / (mx.std(advantages) + 1e-8)
-                advantages = mx.clip(advantages, -5.0, 5.0)
-            else:
-                advantages = mx.zeros((1,))
+            # Pad all sequences to the same length for batching
+            winner_toks_padded = pad_sequences(winner_toks_list, pad_id)
+            loser_toks_padded = pad_sequences(loser_toks_list, pad_id)
+            prompt_toks_padded = pad_sequences(prompt_toks_list, pad_id)
 
-            log_probs_ref = get_log_probs(ref_model, prompt_toks_padded, gen_toks_padded, pad_id)
-            mx.eval(log_probs_ref)
-
-            loss, micro_grads_dict = loss_and_grad_fn( trainable_params, 
-                policy_model,    
+            loss, micro_grads = loss_and_grad_fn(
+                trainable_params,
+                policy_model,
+                ref_model,
+                winner_toks_padded,
+                loser_toks_padded,
                 prompt_toks_padded,
-                gen_toks_padded,
-                advantages,
-                log_probs_ref,
                 config,
                 pad_id
             )
-
-            mx.eval(loss, micro_grads_dict)
-
+            mx.eval(loss, micro_grads)
+            
             if is_nan_or_inf(loss):
-                print("\n⚠️ DETECTED NaN/Inf IN GRADIENTS. SKIPPING STEP TO PREVENT CORRUPTION. ⚠️")
+                print("\n⚠️ DETECTED NaN/Inf IN GRADIENTS. SKIPPING STEP. ⚠️")
                 continue
 
-            # Accumulate grads - We need to zip the keys back with the grads
-            # This logic is a bit complex, let's simplify. `micro_grads` is a flat list.
-            # We can accumulate into a flat list of grads.
-            for key, grad_val in micro_grads_dict.items():
-                accumulated_grads_dict[key] += grad_val
+            for key, grad_val in micro_grads.items():
+                accumulated_grads[key] += grad_val
 
             total_loss += loss.item()
             num_micro_batches += 1
-            del loss, micro_grads_dict, log_probs_ref, advantages
-            mx.eval()
-
+        
         if num_micro_batches > 0:
-            avg_grads_dict = {k: v / num_micro_batches for k, v in accumulated_grads_dict.items()}
+            avg_grads = {k: v / num_micro_batches for k, v in accumulated_grads.items()}
             avg_loss = total_loss / num_micro_batches
 
-            # CHANGE: The optimizer workflow is completely revised.
-            # 1. `clip_grad_norm` needs a list of arrays, so we extract the values.
-            grad_values = list(avg_grads_dict.values())
+            grad_values = list(avg_grads.values())
             clipped_grad_values, _ = optim.clip_grad_norm(grad_values, 1.0)
+            clipped_grads_dict = dict(zip(avg_grads.keys(), clipped_grad_values))
             
-            # 2. Rebuild the dictionary with the clipped gradient values.
-            clipped_grads_dict = dict(zip(avg_grads_dict.keys(), clipped_grad_values))
-
-            # 3. Use `optimizer.apply_gradients`, which takes dictionaries and returns an updated dictionary.
             updated_params = optimizer.apply_gradients(clipped_grads_dict, trainable_params)
-            
-            # We must convert it back to a nested structure using `tree_unflatten`,
-            # just like we do inside the `from_trainable_parameters` helper.
-            updated_params_nested = tree_unflatten(list(updated_params.items()))
-            # 4. Update the model with the new dictionary of parameters.
-            policy_model.update(updated_params_nested)
-            
-            # 5. The new state for the next iteration *is* the updated parameter dictionary.
+            policy_model.update(tree_unflatten(list(updated_params.items())))
             trainable_params = updated_params
-            
             mx.eval(policy_model.parameters(), optimizer.state)
         else:
             avg_loss = -1.0
 
-        # This helps ensure memory from the previous step is released
-        if 'accumulated_grads_list' in locals():
-            del accumulated_grads_list
-        if 'game_rollout' in locals():
-            del game_rollout
-        if 'grouped_attempts' in locals():
-            del grouped_attempts
         gc.collect()
 
         step_counter += 1
         pbar.update(1)
-        pbar.set_postfix({"avg_loss": f"{avg_loss:.4f}",
-                          "win rate": f"{rolling_win_rate:.1f}%"
-        })
+        pbar.set_postfix({"avg_loss": f"{avg_loss:.4f}", "win rate": f"{rolling_win_rate:.1f}%"})
 
         # --- LOGGING, EVALUATION, AND CHECKPOINTING ---
         if step_counter > 0 and step_counter % config.training.log_steps == 0:
@@ -492,32 +382,21 @@ def train(config: cfg.TrainerConfig, system_prompt: str):
         if step_counter > 0 and step_counter % config.evaluation.steps == 0:
             eval_metrics = evaluate(policy_model, tokenizer, test_dataset, config, system_prompt)
             win_rate = eval_metrics['win_rate'] * 100
-            avg_turns = eval_metrics['avg_turns_on_win']
-            dist = eval_metrics['turn_distribution_on_win']
             print(f"\n--- Evaluation at Step {step_counter:04d} ---")
-            print(f"Win Rate: {win_rate:.2f}% | Avg. Turns on Win: {avg_turns:.2f}")
-            print(f"Win Distribution: {dist}")
-            print("--------------------------------------")
-
+            print(f"Win Rate: {win_rate:.2f}% | Avg. Turns on Win: {eval_metrics['avg_turns_on_win']:.2f}")
             eval_steps.append(step_counter)
             eval_rewards.append(eval_metrics['win_rate'])
             writer.add_scalar('Evaluation/win_rate', win_rate, step_counter)
-            writer.add_scalar('Evaluation/avg_turns_on_win', avg_turns, step_counter)
 
-        if step_counter > 0 and step_counter % config.ppo.ref_update_steps == 0:
-            print(f"\n--- Step {step_counter}: Updating reference model ---")
-            ref_model.update(policy_model.parameters())
-
+        # NB: There is no reference model update in GRPO/DPO
+        
         if step_counter > 0 and step_counter % config.training.checkpoint_steps == 0:
-            checkpoint_file = lora.save_checkpoint(model=policy_model,  save_dir=str(adapter_path), checkpoint_file_name="grpo_lora_wordl", 
+            lora.save_checkpoint(model=policy_model,  save_dir=str(adapter_path), checkpoint_file_name="grpo_lora_wordle", 
                                                    step=str(step_counter), timestamp=timestamp)
-            print(f"\n--- Checkpoint saved to {checkpoint_file} ---")
 
     pbar.close()
     print("\n--- Training Finished ---")
-    final_checkpoint = lora.save_checkpoint(policy_model, adapter_path.stem, "final", timestamp)
-    print(f"Final adapter weights saved to {final_checkpoint}")
+    lora.save_checkpoint(policy_model, adapter_path.stem, "final", timestamp)
     writer.close()
-
     plot_training_eval(timestamp, train_steps, train_losses, eval_steps, eval_rewards)
     print("Done.")

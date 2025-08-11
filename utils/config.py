@@ -40,10 +40,11 @@ class RLConfig:
 
 
 @dataclass
-class PPOConfig:
+class GRPOConfig:
     clip_epsilon: float = 0.2
     ref_update_steps: int = 20
     kl_coeff: float = 0.02
+    beta: float = 0.1
     
 @dataclass
 class EvalConfig:
@@ -58,19 +59,19 @@ class TrainerConfig:
     evaluation: EvalConfig
     # Optional fields with a default value of None
     rl: Optional[RLConfig] = None
-    ppo: Optional[PPOConfig] = None
+    grpo: Optional[GRPOConfig] = None
     # TODO remove reward from config since it will be set separately in the training method
     reward: Optional[Dict[str, float]] = None
 
     @classmethod
     def from_dict(cls, config_dict: Dict) -> "TrainerConfig":
         rl = None
-        ppo = None
+        grpo = None
         reward = None
         if "rl" in config_dict.keys():
             rl=RLConfig(**config_dict["rl"])
-        if "ppo" in config_dict.keys():
-            ppo=PPOConfig(**config_dict["ppo"])
+        if "grpo" in config_dict.keys():
+            grpo=GRPOConfig(**config_dict["grpo"])
         if "reward" in config_dict.keys():
             reward = config_dict.get("reward", None)
 
@@ -79,7 +80,7 @@ class TrainerConfig:
             training=TrainingConfig(**config_dict["training"]),
             lora=LoRAConfig(**config_dict["lora"]),
             evaluation=EvalConfig(**config_dict["evaluation"]),
-            ppo=ppo,
+            grpo=grpo,
             rl=rl,
             reward=reward
         )
