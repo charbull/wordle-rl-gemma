@@ -1,0 +1,45 @@
+{
+    "model": {
+        "name": "mlx-community/gemma-3-4b-it-bf16"
+    },
+    "training": {
+        "iterations": 300,
+        "learning_rate": 5e-6,
+        "batch_size": 16,
+        "log_steps": 10,
+        "checkpoint_steps": 50,
+        "resume_from_checkpoint": "",
+        "save_adapter_to": "./adapters/grpo_lora_wordle",
+        "config_file": "./config/grpo_lora_config.json",
+        "accumulation_steps": 8
+    },
+    "lora": {
+        "rank": 16,
+        "alpha": 32.0,
+        "dropout": 0.1,
+        "layers_to_tune": 33
+    },
+    "evaluation": {
+        "steps": 20,
+        "samples": 5
+    },
+    "rl": {
+        "num_generations": 2,
+        "max_completion_length": 512,
+        "sampling_temperature": 0.7,
+        "max_trials": 6
+    },
+    "ppo": {
+        "clip_epsilon": 0.2,
+        "ref_update_steps": 50,
+        "kl_coeff": 0.02
+    },
+    "reward": {
+        "solution_correct_guess": 150.0,
+        "valid_guess_base": 0.0,
+        "violated_clue_penalty": -50.0,
+        "repetition_penalty": -20.0,
+        "format_fail_penalty": -50.0,
+        "length_penalty_per_token": 0.03
+    }
+}
