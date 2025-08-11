@@ -509,7 +509,8 @@ def train(config: cfg.TrainerConfig, system_prompt: str):
             ref_model.update(policy_model.parameters())
 
         if step_counter > 0 and step_counter % config.training.checkpoint_steps == 0:
-            checkpoint_file = lora.save_checkpoint(policy_model, adapter_path.stem, str(step_counter), timestamp)
+            checkpoint_file = lora.save_checkpoint(model=policy_model,  save_dir=str(adapter_path), checkpoint_file_name="grpo_lora_wordl", 
+                                                   step=str(step_counter), timestamp=timestamp)
             print(f"\n--- Checkpoint saved to {checkpoint_file} ---")
 
     pbar.close()

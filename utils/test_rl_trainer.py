@@ -188,5 +188,4 @@ class TestEvaluateFunction(unittest.TestCase):
 
 if __name__ == '__main__':
     print("--- Running Unit Tests for RL Trainer Helper Functions ---")
-    print("Note: The main `train` loop is not unit tested as it requires a full integration setup.")
     unittest.main(argv=['first-arg-is-ignored'], exit=False)

@@ -22,13 +22,53 @@ from utils import config as cfg
 # ==============================================================================
 # ---  DATA STRUCTURES FOR GAME LOGIC ---
 # ==============================================================================
-file_url_possible_answers = "https://raw.githubusercontent.com/Roy-Orbison/wordle-guesses-answers/refs/heads/main/answers.txt"
-
+URL_POSSIBLE_ANSWERS = "https://gist.githubusercontent.com/kcwhite/bb598f1b3017b5477cb818c9b086a5d9/raw/5a0adbbb9830ed93a573cb87a7c14bb5dd0b1883/wordle_possibles.txt"
+LOCAL_FILE_PATH = "./data/nyt_possible_wordle_list.txt"
+_ALLOWED_GUESSES_CACHE = None
 # --- Word Lists ---
-SOLUTION_WORDS = read_files.load_word_list_from_url(file_url_possible_answers, "./data/nyt_possible_wordle_list.txt")
+ALLOWED_GUESSES = read_files.load_word_list_from_url(URL_POSSIBLE_ANSWERS, LOCAL_FILE_PATH)
 GUESS_TAG_RE = re.compile(r"<guess>(.*?)</guess>", re.DOTALL | re.IGNORECASE)
 # This should only match 5 ALL-CAPS letters
 FIVE_LETTER_WORD_RE = re.compile(r'\b([A-Z]{5})\b')
+
+# Pre-calculate letter frequencies based on the solution words for accuracy.
+# This only runs once when the script starts.
+from collections import Counter
+LETTER_FREQUENCIES = Counter(
+    letter for word in ALLOWED_GUESSES for letter in word.upper()
+)
+MAX_FREQ = max(LETTER_FREQUENCIES.values())
+NORMALIZED_LETTER_FREQS = {
+    letter: freq / MAX_FREQ for letter, freq in LETTER_FREQUENCIES.items()
+}
+
+def get_allowed_guesses():
+    """
+    Loads the list of allowed guess words, caching the result after the first call.
+    This prevents file I/O from running on simple module import.
+    """
+    global _ALLOWED_GUESSES_CACHE
+    if _ALLOWED_GUESSES_CACHE is None:
+        print("--- Loading Wordle guess list for the first time... ---")
+        _ALLOWED_GUESSES_CACHE = read_files.load_word_list_from_url(
+            URL_POSSIBLE_ANSWERS, LOCAL_FILE_PATH
+        )
+    return _ALLOWED_GUESSES_CACHE
+
+def get_letter_frequencies():
+    """Calculates and caches letter frequencies based on the solution words."""
+    global NORMALIZED_LETTER_FREQS # Assuming this is the name you want
+    # Check if it's already calculated, if not, compute it
+    if "NORMALIZED_LETTER_FREQS" not in globals():
+        from collections import Counter
+        allowed_words = get_allowed_guesses()
+        letter_counts = Counter(letter for word in allowed_words for letter in word.upper())
+        max_freq = max(letter_counts.values()) if letter_counts else 1
+        # Declare as global to cache it
+        globals()["NORMALIZED_LETTER_FREQS"] = {
+            letter: freq / max_freq for letter, freq in letter_counts.items()
+        }
+    return globals()["NORMALIZED_LETTER_FREQS"]
 
 @dataclass
 class GuessFeedback:
@@ -184,6 +224,25 @@ def is_valid_guess(guess, allowed_words):
         and guess.upper() in {w.upper() for w in allowed_words}
     )
 
+def reward_for_entropy_proxy(guess: str, config: cfg.TrainerConfig) -> float:
+    """
+    Calculates a reward bonus based on heuristics that approximate high-entropy
+    guesses: unique letters and common letters.
+    """
+    if not guess or len(guess) != 5:
+        return 0.0
+
+    # Bonus for number of unique letters
+    unique_letters = set(guess)
+    unique_bonus = (len(unique_letters) / 5.0) * config.reward.get("entropy_unique_letter_bonus", 2.0)
+
+    # Bonus for using common letters, weighted by their frequency
+    common_letter_score = sum(NORMALIZED_LETTER_FREQS.get(letter, 0) for letter in unique_letters)
+    # Normalize by a typical score for a 5-unique-letter word to keep the bonus in a stable range
+    common_bonus = (common_letter_score / 3.5) * config.reward.get("entropy_common_letter_bonus", 3.0)
+    
+    return unique_bonus + common_bonus
+
 def calculate_total_reward(
     response: str,
     secret_word: str,
@@ -248,8 +307,11 @@ def calculate_total_reward(
     # --- Step 5: If no rules were broken, give a small neutral reward ---
     # This encourages exploration without rewarding suboptimal guesses.
     # It tells the model "Okay, that was a valid move, now try to win."
-    return config.reward.get("valid_guess_base")
+    base_reward =  config.reward.get("valid_guess_base")
 
+    entropy_bonus = reward_for_entropy_proxy(guess, config)
+
+    return base_reward + entropy_bonus
 
 
 def format_prompt_for_model(past_feedback: List[GuessFeedback], system_prompt: str) -> List[dict]:
@@ -360,7 +422,7 @@ def play_wordle_game(
                 secret_word,
                 past_feedback,
                 config,
-                SOLUTION_WORDS
+                ALLOWED_GUESSES
             ) 
             # length_penalty_per_token = config.reward.get("length_penalty_per_token")
             # num_tokens = len(tokenizer.encode(response))
@@ -373,7 +435,7 @@ def play_wordle_game(
             if not guess:
                 parsed_guess_state = "INVALID_FORMAT"
 
-            elif not is_valid_guess(guess, SOLUTION_WORDS):
+            elif not is_valid_guess(guess, ALLOWED_GUESSES):
                 parsed_guess_state = "WORD_NOT_IN_LIST"
 
             elif is_repeat:
@@ -393,7 +455,7 @@ def play_wordle_game(
             current_turn_attempts.append(attempt)
 
         all_invalid = all(
-                att.parsed_guess in ["INVALID_FORMAT", "REPEATED_GUESS"]
+                att.parsed_guess in ["INVALID_FORMAT", "REPEATED_GUESS", "WORD_NOT_IN_LIST"]
                 for att in current_turn_attempts
             )
         if all_invalid:
@@ -414,19 +476,20 @@ def play_wordle_game(
         best_guess = best_attempt.parsed_guess
 
         # Add the played word to the set to check for future repetitions
-        if best_guess not in ["INVALID_FORMAT", "REPEATED_GUESS"]:
+        if best_guess not in ["INVALID_FORMAT", "REPEATED_GUESS", "WORD_NOT_IN_LIST"]:
             already_guessed_words.add(best_guess)
 
         # 5. Generate specific feedback for the model's *next* turn based on the best attempt
         if best_guess == "INVALID_FORMAT":
             feedback = GuessFeedback(
-                "INVALID_FORMAT", "Your response did not contain a valid 5-letter guess.")
+                "INVALID_FORMAT", "Your response did not contain a valid 5-letter guess in all-caps inside <guess> tags.")
         elif best_guess == "REPEATED_GUESS":
             feedback = GuessFeedback(
-                "REPEATED_GUESS", "You have already guessed that word.")
+                "REPEATED_GUESS", "You have already guessed that word. Try a different one.")
         elif best_guess == "WORD_NOT_IN_LIST":
             feedback = GuessFeedback(
-                "WORD_NOT_IN_LIST", "That word is not in the official Wordle list.")
+                "WORD_NOT_IN_LIST", 
+                f"Your guess '{best_attempt.parsed_guess}' is not in the official Wordle dictionary. Try another word." )
         else:
             # The guess is a 5-letter word, get its official Wordle feedback
             feedback = get_feedback(best_guess, secret_word)
