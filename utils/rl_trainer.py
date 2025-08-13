@@ -390,9 +390,9 @@ def train(config: cfg.TrainerConfig, system_prompt: str):
         step_counter += 1
         pbar.update(1)
         pbar.set_postfix({
-            "avg_loss": f"{avg_loss:.4f}", 
-            "avg_reward": f"{avg_reward_this_step:.4f}",
-            "win rate": f"{rolling_win_rate:.1f}%"
+            "loss": f"{avg_loss:.3f}", 
+            "reward": f"{avg_reward_this_step:.2f}",
+            "win%": f"{rolling_win_rate:.1f}"
         })
 
         # --- LOGGING, EVALUATION, AND CHECKPOINTING ---
