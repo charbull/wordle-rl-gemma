@@ -213,7 +213,8 @@ def evaluate(
             secret_word=secret_word,
             system_prompt=system_prompt,
             config=config,
-            sampler=eval_sampler
+            sampler=eval_sampler,
+            print_debug=True
         )
         num_samples_processed += 1
         if game_result.solved:
@@ -347,16 +348,16 @@ def train(config: cfg.TrainerConfig, system_prompt: str):
         sample = next(data_iterator)
         game_rollout = play_wordle_game(
             model=policy_model, tokenizer=tokenizer, secret_word=sample['secret'],
-            system_prompt=system_prompt, config=config, sampler=sampler, initial_history=sample['messages']
+            system_prompt=system_prompt, config=config, sampler=sampler, initial_history=sample['messages'],
+            print_debug=(step_counter % config.training.log_steps == 0)
         )
         
         win_tracker.append(1 if game_rollout.solved else 0)
         rolling_win_rate = (sum(win_tracker) / len(win_tracker)) * 100 if win_tracker else 0.0
         if not game_rollout.attempts:
-            pbar.update(1)
-            continue
+            print("\n⚠️ Warning: Game rollout produced no attempts. This step will have no loss/gradient update. ⚠️")
 
-        all_rewards = [att.reward for att in game_rollout.attempts]
+        all_rewards = [att.training_reward for att in game_rollout.attempts]
         avg_reward_this_step = sum(all_rewards) / len(all_rewards) if all_rewards else 0.0
 
         # Group attempts by their prompt string to prompt
@@ -375,7 +376,7 @@ def train(config: cfg.TrainerConfig, system_prompt: str):
                 continue
 
             # Identify the winner (highest reward) for this prompt
-            winner = max(attempts_for_prompt, key=lambda att: att.reward)
+            winner = max(attempts_for_prompt, key=lambda att: att.training_reward)
             
             # Create all (winner, loser) pairs of generated responses for this prompt
             winner_toks_list, loser_toks_list, prompt_toks_list = [], [], []

@@ -1,103 +1,145 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
+# Make sure the import path matches your project structure
 from utils.rewards_wordle import (
     calculate_total_reward,
-    GuessFeedback
+    GuessFeedback,
+    # We may need to mock this function, so let's make sure it's importable
+    # If it's in the same file, this is fine.
 )
 
-# Mocking the global letter frequencies in case they are used elsewhere, though not in these tests
-MOCK_NORMALIZED_FREQS = {
-    'E': 1.0, 'A': 0.9, 'R': 0.8, 'I': 0.7, 'O': 0.6,
-    'T': 0.5, 'N': 0.4, 'S': 0.3, 'L': 0.2, 'C': 0.1,
-}
-
-@patch('utils.rewards_wordle.NORMALIZED_LETTER_FREQS', MOCK_NORMALIZED_FREQS)
 class TestCalculateTotalReward(unittest.TestCase):
     def setUp(self):
-        """Set up a mock config and a standard game state for all tests."""
+        """Set up a mock config, tokenizer, and standard game state for all tests."""
         self.mock_config = MagicMock()
+        # REVISED: Updated with new graduated penalties and bonuses
         self.mock_config.reward = {
             "format_fail_penalty": -100.0,
-            "repetition_penalty": -50.0,
-            "solution_correct_guess": 100.0,
-            "violated_clue_penalty": -25.0,
-            "valid_guess_base": 1.0,
+            "repetition_penalty": -75.0,
+            "not_in_dictionary_penalty": -100.0,
+            "solution_correct_guess": 150.0,
+            "valid_guess_base": 5.0,
+            # Graduated Penalties
+            "gray_letter_penalty": -5.0,
+            "yellow_letter_penalty": -10.0,
+            "green_position_penalty": -15.0,
+            # Behavioral Penalties/Bonuses
+            "time_penalty_per_guess": -1.0,
+            "length_penalty_per_token": -0.01,
+            "entropy_unique_letter_bonus": 5.0,
+            "entropy_common_letter_bonus": 5.0,
         }
-        # A small, clean list of allowed words for testing
+        
+        # Mock the tokenizer for deterministic length penalties
+        self.mock_tokenizer = MagicMock()
+        # Let's say every response is encoded to 20 tokens for simplicity in testing
+        self.mock_tokenizer.encode.return_value = [0] * 20
+
         self.allowed_words = {'TRAIN', 'GHOST', 'PLUMB', 'SOLVE', 'CRANE', 'SHAME', 'TABLE'}
         self.secret_word = "SOLVE"
 
     def test_correct_guess_is_always_winner(self):
-        """A correct guess should always receive the highest reward, even if not in the allowed list."""
+        """A correct guess's game_score should be the solution_correct_guess reward."""
         response = "<guess>SOLVE</guess>"
-        # Note: We are using a different allowed_words set that does NOT contain SOLVE
-        # to prove the win condition is checked first.
-        custom_allowed_words = {'TRAIN', 'CRANE'}
-        reward = calculate_total_reward(response, self.secret_word, [], self.mock_config, custom_allowed_words)
-        self.assertEqual(reward, self.mock_config.reward["solution_correct_guess"])
+        game_score, _ = calculate_total_reward(
+            response, self.secret_word, [], self.mock_config, self.allowed_words, self.mock_tokenizer
+        )
+        self.assertEqual(game_score, self.mock_config.reward["solution_correct_guess"])
 
     def test_word_not_in_dictionary(self):
-        """Guessing a word not in the allowed list should receive the format_fail_penalty."""
-        response = "<guess>APPLE</guess>" # APPLE is not in self.allowed_words
-        reward = calculate_total_reward(response, self.secret_word, [], self.mock_config, self.allowed_words)
-        self.assertEqual(reward, self.mock_config.reward["format_fail_penalty"])
+        """Guessing a word not in the allowed list should have a format_fail_penalty game_score."""
+        response = "<guess>APPLE</guess>"
+        game_score, _ = calculate_total_reward(
+            response, self.secret_word, [], self.mock_config, self.allowed_words, self.mock_tokenizer
+        )
+        self.assertEqual(game_score, self.mock_config.reward["format_fail_penalty"])
 
     def test_repeated_guess(self):
-        """Repeating a previous guess should result in a specific penalty."""
+        """Repeating a guess should have a repetition_penalty game_score."""
         past_feedback = [GuessFeedback(guess="TRAIN", feedback="x x x x x")]
         response = "<guess>TRAIN</guess>"
-        reward = calculate_total_reward(response, self.secret_word, past_feedback, self.mock_config, self.allowed_words)
-        self.assertEqual(reward, self.mock_config.reward["repetition_penalty"])
+        game_score, _ = calculate_total_reward(
+            response, self.secret_word, past_feedback, self.mock_config, self.allowed_words, self.mock_tokenizer
+        )
+        self.assertEqual(game_score, self.mock_config.reward["repetition_penalty"])
 
-    def test_violation_of_gray_letter(self):
-        """Using a known gray letter should result in the violated_clue_penalty."""
-        # In CRANE vs SOLVE, C, R, A, N are gray.
-        past_feedback = [GuessFeedback(guess="CRANE", feedback="x x x x ✓")]
-        # GHOST uses 'O' (yellow), 'S' (green), but also 'C' which is gray from CRANE.
-        # This test is tricky, let's simplify.
-        # Let's say secret is TABLE. First guess is SONIC -> S,O,N,I are gray.
+    def test_violation_of_gray_letters(self):
+        """Using known gray letters should result in a sum of gray_letter_penalties."""
         secret_word = "TABLE"
+        # From SONIC vs TABLE, letters S, O, N, I, C are gray.
         past_feedback = [GuessFeedback(guess="SONIC", feedback="x x x x x")]
-        # Now guess CRANE, which contains gray 'C' and 'N'.
+        # CRANE contains two gray letters: C and N.
         response = "<guess>CRANE</guess>"
-        reward = calculate_total_reward(response, secret_word, past_feedback, self.mock_config, self.allowed_words)
-        self.assertEqual(reward, self.mock_config.reward["violated_clue_penalty"])
+        
+        expected_penalty = 2 * self.mock_config.reward["gray_letter_penalty"] # 2 * -5.0 = -10.0
+        
+        game_score, _ = calculate_total_reward(
+            response, secret_word, past_feedback, self.mock_config, self.allowed_words, self.mock_tokenizer
+        )
+        self.assertEqual(game_score, expected_penalty)
 
     def test_violation_of_green_letter_position(self):
-        """Failing to use a known green letter in its correct spot should be penalized."""
-        # In SOLVE, if 'S' is green in pos 0, a guess not starting with 'S' is a violation.
-        past_feedback = [GuessFeedback(guess="SHAME", feedback="✓ x x x ✓")] # S is green
-        response = "<guess>GHOST</guess>" # Does not start with S
-        reward = calculate_total_reward(response, self.secret_word, past_feedback, self.mock_config, self.allowed_words)
-        self.assertEqual(reward, self.mock_config.reward["violated_clue_penalty"])
+        """Failing to use a known green letter in its spot should be penalized."""
+        past_feedback = [GuessFeedback(guess="SHAME", feedback="✓ x x x ✓")] # Greens: S at 0, E at 4. Grays: H, A, M
+        response = "<guess>GHOST</guess>" # Violates 2 greens (S,E) and 1 gray (H)
+        
+        game_score, _ = calculate_total_reward(
+            response, self.secret_word, past_feedback, self.mock_config, self.allowed_words, self.mock_tokenizer
+        )
+        
+        expected_penalty = (2 * self.mock_config.reward["green_position_penalty"]) + \
+                        (1 * self.mock_config.reward["gray_letter_penalty"]) # (2*-15) + (1*-5) = -35.0
+        self.assertEqual(game_score, expected_penalty)
+
 
     def test_violation_of_yellow_letter_usage(self):
         """Failing to use a known yellow letter anywhere in the guess should be penalized."""
-        # In SOLVE, if 'L' is yellow, a guess without 'L' is a violation.
-        past_feedback = [GuessFeedback(guess="PLUMB", feedback="x ✓ x x x")] # L is yellow
-        response = "<guess>GHOST</guess>" # Does not contain L
-        reward = calculate_total_reward(response, self.secret_word, past_feedback, self.mock_config, self.allowed_words)
-        self.assertEqual(reward, self.mock_config.reward["violated_clue_penalty"])
+        past_feedback = [GuessFeedback(guess="PLUMB", feedback="x - x x x")] # L is yellow. P,U,M,B are gray.
+        response = "<guess>GHOST</guess>"
+        
+        game_score, _ = calculate_total_reward(
+            response, self.secret_word, past_feedback, self.mock_config, self.allowed_words, self.mock_tokenizer
+        )
+        
+        self.assertEqual(game_score, self.mock_config.reward["yellow_letter_penalty"])
 
-    def test_valid_first_guess(self):
-        """A valid first guess that follows no rules (as there are none) gets the base reward."""
-        response = "<guess>TRAIN</guess>"
-        expected_total_reward = self.mock_config.reward["valid_guess_base"]
-        reward = calculate_total_reward(response, self.secret_word, [], self.mock_config, self.allowed_words)
-        self.assertAlmostEqual(reward, expected_total_reward)
-
-    def test_valid_guess_that_follows_all_clues(self):
-        """A valid guess that correctly uses all green and yellow clues should get the base reward."""
+    @patch('utils.rewards_wordle.reward_for_entropy_proxy', return_value=10.0)
+    def test_valid_guess_that_follows_all_clues(self, mock_entropy_proxy):
+        """A valid guess following all clues should get the base reward + entropy bonus."""
         secret_word = "TABLE"
         # From CRANE vs TABLE -> A is yellow, E is yellow. C, R, N are gray.
         past_feedback = [GuessFeedback(guess="CRANE", feedback="x x - x -")]
         # SHAME uses A and E, and no gray letters C, R, N. This is a valid move.
         response = "<guess>SHAME</guess>"
-        expected_total_reward = self.mock_config.reward["valid_guess_base"]
-        reward = calculate_total_reward(response, secret_word, past_feedback, self.mock_config, self.allowed_words)
-        self.assertAlmostEqual(reward, expected_total_reward)
+        
+        expected_game_score = self.mock_config.reward["valid_guess_base"] + 10.0 # 5.0 + 10.0 = 15.0
+        
+        game_score, _ = calculate_total_reward(
+            response, secret_word, past_feedback, self.mock_config, self.allowed_words, self.mock_tokenizer
+        )
+        self.assertAlmostEqual(game_score, expected_game_score)
 
+    @patch('utils.rewards_wordle.reward_for_entropy_proxy', return_value=10.0)
+    def test_training_reward_includes_behavioral_penalties(self, mock_entropy_proxy):
+        """The final training_reward should include game_score and behavioral penalties."""
+        response = "<guess>TRAIN</guess>" # A valid first guess
+        
+        # 1. Calculate expected game_score
+        expected_game_score = self.mock_config.reward["valid_guess_base"] + 10.0 # 5.0 + 10.0 = 15.0
+        
+        # 2. Calculate expected behavioral penalties
+        time_penalty = self.mock_config.reward["time_penalty_per_guess"] # -1.0
+        # self.mock_tokenizer returns a list of 20 tokens
+        length_penalty = 20 * self.mock_config.reward["length_penalty_per_token"] # 20 * -0.01 = -0.2
+        
+        # 3. Calculate final expected training_reward
+        expected_training_reward = expected_game_score + time_penalty + length_penalty # 15.0 - 1.0 - 0.2 = 13.8
+
+        _, training_reward = calculate_total_reward(
+            response, self.secret_word, [], self.mock_config, self.allowed_words, self.mock_tokenizer
+        )
+        self.assertAlmostEqual(training_reward, expected_training_reward)
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
