@@ -17,8 +17,9 @@ from pathlib import Path
 from datetime import datetime
 from utils import config as cfg
 from utils import lora
-from utils.rewards_wordle import play_wordle_game
+from utils.rewards_wordle import play_wordle_game, parse_guess
 from tensorboardX import SummaryWriter
+from functools import partial
 
 # ==============================================================================
 # ---  HELPER FUNCTIONS ---
@@ -267,6 +268,30 @@ def load_wordle_trajectories_from_jsonl(dataset_path: str) -> Dataset:
     print(f"Successfully loaded {len(dataset)} game trajectories.")
     return dataset
 
+
+def is_playable_trajectory(example, max_trials: int):
+    """
+    Checks if a game trajectory is playable.
+
+    A trajectory is NOT playable if:
+    1. It has already been solved.
+    2. It has already reached or exceeded the maximum number of trials.
+    """
+    secret_word = example['secret'].upper()
+    assistant_messages = [m for m in example['messages'] if m.get("role") == "assistant"]
+
+    # Check 2: Has the game already used all its turns?
+    if len(assistant_messages) >= max_trials:
+        return False # This game is already over (likely a loss)
+
+    # Check 1: Has the game already been solved?
+    for message in assistant_messages:
+        guess = parse_guess(message.get("content", ""))
+        if guess and guess == secret_word:
+            return False # This game was already solved
+            
+    return True # This game is unsolved and has turns remaining
+
 # ==============================================================================
 # --- MAIN TRAINING ---
 # ==============================================================================
@@ -322,7 +347,18 @@ def train(config: cfg.TrainerConfig, system_prompt: str):
     pad_id = tokenizer.pad_token_id
 
     dataset = load_wordle_trajectories_from_jsonl(dataset_path)
-    shuffled_dataset = dataset.shuffle(seed=42)
+    print(f"Original dataset size: {len(dataset)}")
+
+    # Create a filter function that knows about max_trials from your config
+    max_trials_for_filter = config.rl.max_trials
+    playable_filter = partial(is_playable_trajectory, max_trials=max_trials_for_filter)
+
+    # Apply filter
+    playable_dataset = dataset.filter(playable_filter)
+    print(f"Filtered dataset size (playable games only): {len(playable_dataset)}")
+
+    # Now, use the fully cleaned dataset for training
+    shuffled_dataset = playable_dataset.shuffle(seed=42)
     
     train_percentage = 0.95
     num_train_samples = int(len(shuffled_dataset) * train_percentage)

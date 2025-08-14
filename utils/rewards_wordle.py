@@ -221,7 +221,8 @@ def calculate_total_reward(
         game_score = reward_config.get("solution_correct_guess")
         
     # PRIORITY 2: Handle fundamental game rule violations
-    elif not is_valid_guess(guess, allowed_words):
+    elif not is_valid_guess(guess, allowed_words) and \
+          reward_config.get("not_in_dictionary_penalty") != 0.0:
         game_score = reward_config.get("not_in_dictionary_penalty")
     elif any(fb.guess == guess for fb in past_feedback):
         game_score = reward_config.get("repetition_penalty")
@@ -265,7 +266,7 @@ def calculate_total_reward(
             game_score = total_penalty
         else:
             # PRIORITY 4: This is a "good" guess that follows all rules. Reward it.
-            base_reward = reward_config.get("valid_guess_base", 0.0)
+            base_reward = reward_config.get("valid_guess_base")
             entropy_bonus = reward_for_entropy_proxy(guess, config)
             game_score = base_reward + entropy_bonus
 
@@ -429,9 +430,14 @@ def play_wordle_game(
             current_turn_attempts.append(attempt)
             
         # Filter for only valid, new, parsable attempts to advance the game state.
+        # and from the dictionary
         valid_candidates = [
             att for att in current_turn_attempts
-            if att.parsed_guess and att.parsed_guess not in already_guessed_words
+            if att.parsed_guess and \
+            att.parsed_guess not in already_guessed_words
+            # TODO: Consider if we want to penalize words not in the dictionary to make it more strict
+            # and \
+            #is_valid_guess(att.parsed_guess, ALLOWED_GUESSES)
         ]
           # If NO valid, new candidates were generated in this turn, the game is stuck.
         if not valid_candidates:
@@ -471,10 +477,44 @@ def play_wordle_game(
             break
             
     if not game_rollout.solved:
-        valid_guesses_in_game = [
-            fb.guess for fb in past_feedback 
-            if fb.guess not in ['INVALID_FORMAT', 'REPEATED_GUESS']
-        ]
-        print(f"❌ Did not guess '{secret_word.upper()}' in {max_trials} trials. Guesses: {valid_guesses_in_game}")
-        
+        if print_debug:
+            print(f"❌ Did not guess '{secret_word.upper()}' in {max_trials} trials. Turn-by-turn breakdown:")
+
+            from collections import defaultdict
+            # Group all generated attempts by their prompt, which represents a single turn.
+            grouped_by_turn = defaultdict(list)
+            for attempt in game_rollout.attempts:
+                # We only care about attempts that produced a parsable guess for this summary
+                if attempt.parsed_guess:
+                    grouped_by_turn[attempt.prompt_string].append(attempt)
+            
+            # Ensure we process turns in the order they were played
+            # We do this by finding the original index of the first attempt for each turn's prompt
+            turn_prompts = sorted(
+                grouped_by_turn.keys(), 
+                key=lambda p: game_rollout.attempts.index(grouped_by_turn[p][0])
+            )
+
+            # Iterate through each turn and print the winner/loser summary
+            for i, prompt in enumerate(turn_prompts):
+                attempts_for_turn = grouped_by_turn[prompt]
+                if not attempts_for_turn:
+                    continue
+
+                # The "winner" for this turn is the one with the highest game_score.
+                # This is the guess that was chosen to advance the game state.
+                winner = max(attempts_for_turn, key=lambda att: att.game_score)
+                
+                # "Losers" are all other generated candidates for this turn.
+                losers = [att for att in attempts_for_turn if att is not winner]
+
+                # Format the strings for clean printing
+                winner_str = f"'{winner.parsed_guess}' (Score: {winner.game_score:.2f})"
+                if losers:
+                    losers_str_list = [f"'{l.parsed_guess}' ({l.game_score:.2f})" for l in losers]
+                    losers_str = ", ".join(losers_str_list)
+                else:
+                    losers_str = "None (only one generation)"
+
+                print(f"  - Turn {i+1}: Winner = {winner_str} | Losers = [{losers_str}]")
     return game_rollout
