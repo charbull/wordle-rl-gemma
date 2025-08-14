@@ -1,6 +1,13 @@
 # wordle-rl
-Learning RL with LoRA through Wordle on MAC OS with MLX
+* This is a side project to learn the concept of RL compared to SFT.
+* I picked up Wordle since it seems a fun and a challenging task to try to teach the LLM about it.
+* I used Gemini 2.5 Pro to brainstorm and code few functions.
+* Running the training on Mac 4 Pro with 48 GB and Gemma3-it-4b
 
+## Why MLX
+
+1. I wanted to run local training to get a better idea of the constrained
+2. It seems MLX is 2x faster than pytorch on MPS for training: [comparison](https://github.com/ml-explore/mlx/issues/1313)
 
 ## Setup
 

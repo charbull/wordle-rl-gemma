@@ -13,7 +13,6 @@ class TrainingConfig:
     learning_rate: float
     batch_size: int
     log_steps: int
-    accumulation_steps: int
     checkpoint_steps: int
     resume_from_checkpoint: str
     # path to save the adater to

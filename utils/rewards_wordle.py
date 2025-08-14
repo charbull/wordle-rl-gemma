@@ -16,7 +16,6 @@ import ast
 from typing import List
 from mlx_lm import generate
 from dataclasses import dataclass, field
-from utils import prompt
 from utils import read_files
 from utils import config as cfg
 # ==============================================================================
@@ -31,9 +30,15 @@ GUESS_TAG_RE = re.compile(r"<guess>(.*?)</guess>", re.DOTALL | re.IGNORECASE)
 # This should only match 5 ALL-CAPS letters
 FIVE_LETTER_WORD_RE = re.compile(r'\b([A-Z]{5})\b')
 
+#============================================================================= 
+# --- Reward Calculation Helpers ---
+# TODO: For now run without it to simplify the reward function.
+# Just to let the tests pass.
+
+
 # Pre-calculate letter frequencies based on the solution words for accuracy.
 # This only runs once when the script starts.
-from collections import Counter
+# from collections import Counter
 LETTER_FREQUENCIES = Counter(
     letter for word in ALLOWED_GUESSES for letter in word.upper()
 )
@@ -70,6 +75,27 @@ def get_letter_frequencies():
         }
     return globals()["NORMALIZED_LETTER_FREQS"]
 
+def reward_for_entropy_proxy(guess: str, config: cfg.TrainerConfig) -> float:
+    """
+    Calculates a reward bonus based on heuristics that approximate high-entropy
+    guesses: unique letters and common letters.
+    """
+    if not guess or len(guess) != 5:
+        return 0.0
+
+    # Bonus for number of unique letters
+    unique_letters = set(guess)
+    unique_bonus = (len(unique_letters) / 5.0) * config.reward.get("entropy_unique_letter_bonus")
+
+    # Bonus for using common letters, weighted by their frequency
+    common_letter_score = sum(NORMALIZED_LETTER_FREQS.get(letter, 0) for letter in unique_letters)
+    # Normalize by a typical score for a 5-unique-letter word to keep the bonus in a stable range
+    common_bonus = (common_letter_score / 3.5) * config.reward.get("entropy_common_letter_bonus")
+    
+    return unique_bonus + common_bonus
+#=============================================================================
+
+
 @dataclass
 class GuessFeedback:
     """Represents a single guess and its corresponding feedback."""
@@ -96,6 +122,11 @@ class GameRollout:
     solved: bool = False
 
 def get_feedback(guess: str, secret_word: str) -> GuessFeedback:
+    """
+    Given a guess and the secret word, returns the feedback string in the format:
+    '✓' for correct position, '-' for correct letter wrong position, 'x' for incorrect letter.
+    Example: guess='CRANE', secret_word='CLEAN' -> feedback='✓ - ✓ x -'
+    """
     guess = guess.upper()
     secret_word = secret_word.upper()
     if len(guess) != 5:
@@ -151,98 +182,16 @@ def parse_guess(response: str) -> str:
     # Otherwise, no validly formatted guess was found.
     return None
 
-def reward_for_format(completion: str, config: cfg.TrainerConfig) -> float:
-    try:
-        if not ("<think>" in completion and "</think>" in completion and "<guess>" in completion and "</guess>" in completion): return 0.0
-        guess = parse_guess(completion)
-        if not guess: return 0.0
-        reward = config.reward["format_base"]
-        if len(guess) == 5: reward += config.reward["format_len_bonus"]
-        return reward
-    except Exception: return 0.0
-
-def reward_for_feedback_use(completion: str, history_str: str, config: cfg.TrainerConfig) -> float:
-    try:
-        guess = parse_guess(completion)
-        if not guess or len(guess) != 5: return 0.0
-        history_list = ast.literal_eval(history_str) if history_str else []
-        
-        if not history_list: 
-            # return 1 for the guess we dont want to penalize on the first guess
-            # avoid reward hacking?
-            return 1.0
-        
-        correct, valid, wrong = {}, {}, set()
-        for _, feedback_str in history_list:
-            for i, fb in enumerate(feedback_str.split(" ")):
-                letter, status = fb[0], fb[2]
-                if status == '✓': correct.setdefault(letter, set()).add(i)
-                elif status == '-': valid.setdefault(letter, set()).add(i)
-                else: wrong.add(letter)
-        
-        reward = 0.0
-        for idx, letter in enumerate(guess):
-            if letter in correct and idx in correct[letter]:
-                reward += config.reward["feedback_correct_pos"]
-            elif letter in valid and idx not in valid.get(letter, set()):
-                reward += config.reward["feedback_correct_letter"]
-            elif letter in valid and idx in valid.get(letter, set()):
-                reward += config.reward["feedback_reuse_penalty"]
-            elif letter in wrong:
-                reward += config.reward["feedback_wrong_letter_penalty"]
-            else:
-                reward += config.reward["feedback_new_letter"]
-        return max(0, reward)
-    except Exception: 
-        return 0.0
-
-def reward_partial_credit(guess: str, secret_word: str, config: cfg.TrainerConfig) -> float:
-    if not guess or not secret_word or len(guess) != 5: return 0.0
-    guess, secret_word = guess.upper(), secret_word.upper()
-    reward = config.reward["partial_base"]
-    secret_counts = Counter(secret_word)
-    scored = [False] * len(guess)
-
-    for i in range(len(guess)):
-        if guess[i] == secret_word[i]:
-            reward += config.reward["partial_green"]
-            secret_counts[guess[i]] -= 1
-            scored[i] = True
-
-    for i in range(len(guess)):
-        if not scored[i]:
-            if guess[i] in secret_counts and secret_counts[guess[i]] > 0:
-                reward += config.reward["partial_yellow"]
-                secret_counts[guess[i]] -= 1
-    return reward
-
-
 def is_valid_guess(guess, allowed_words):
+    """
+    Checks if the guess is a valid 5-letter word in the allowed words list.
+    """
     return (
         guess
         and len(guess) == 5
         and guess.isalpha()
         and guess.upper() in {w.upper() for w in allowed_words}
     )
-
-# def reward_for_entropy_proxy(guess: str, config: cfg.TrainerConfig) -> float:
-#     """
-#     Calculates a reward bonus based on heuristics that approximate high-entropy
-#     guesses: unique letters and common letters.
-#     """
-#     if not guess or len(guess) != 5:
-#         return 0.0
-
-#     # Bonus for number of unique letters
-#     unique_letters = set(guess)
-#     unique_bonus = (len(unique_letters) / 5.0) * config.reward.get("entropy_unique_letter_bonus")
-
-#     # Bonus for using common letters, weighted by their frequency
-#     common_letter_score = sum(NORMALIZED_LETTER_FREQS.get(letter, 0) for letter in unique_letters)
-#     # Normalize by a typical score for a 5-unique-letter word to keep the bonus in a stable range
-#     common_bonus = (common_letter_score / 3.5) * config.reward.get("entropy_common_letter_bonus")
-    
-#     return unique_bonus + common_bonus
 
 def calculate_total_reward(
     response: str,
@@ -252,29 +201,29 @@ def calculate_total_reward(
     allowed_words: set
 ) -> float:
     """
-    A reward function focused on teaching the model the most important rules of Wordle.
+    Calculates the total reward for a given model response based on the game state
+    and the provided configuration. The reward function prioritizes winning guesses,
+    penalizes invalid or repeated guesses, and applies penalties for violating known clues.
     """
     guess = parse_guess(response)
 
-    # Catastrophic failure: The model didn't produce a parsable guess at all.
+    # The model didn't produce a parsable guess at all.
     if not guess:
         return config.reward.get("format_fail_penalty")
 
-    # --- Step 1 (THE MOST IMPORTANT): Check for a win immediately. ---
+    # --- Check for a win immediately. ---
     # This is the highest possible reward and should override all other checks.
     if guess == secret_word.upper():
         return config.reward.get("solution_correct_guess")
 
-    # --- Step 2: Now, check for other failures like invalid words or repeats. ---
+    # --- Check for other failures like invalid words or repeats. ---
     if not is_valid_guess(guess, allowed_words):
         return config.reward.get("format_fail_penalty")
 
     if any(fb.guess == guess for fb in past_feedback):
         return config.reward.get("repetition_penalty")
 
-    # --- Step 3: If it's a valid, non-winning, non-repeated guess, evaluate it. ---
-    # (The rest of the function for clue violation penalties remains the same)
-    
+    # --- If it's a valid, non-winning, non-repeated guess, partial rewards: ---    
     known_green = {}
     known_yellow = set()
     all_valid_guessed_letters = set()
@@ -305,15 +254,14 @@ def calculate_total_reward(
         if guess[idx] != letter:
             return violated_clue_penalty
             
-    # --- Step 4: If no rules were broken, give a small neutral reward. ---
+    # ---  If no rules were broken, give a small neutral reward. ---
+    # add entropy bonus later here if needed
     return config.reward.get("valid_guess_base")
 
 
 def format_prompt_for_model(past_feedback: List[GuessFeedback], system_prompt: str) -> List[dict]:
     """
     Formats the history of guesses into a message list for the model.
-    This version provides standard feedback for all guesses and adds a note
-    for words not in the dictionary.
     """
     if not past_feedback:
         user_content = "This is the first turn. Please provide your best starting word."
@@ -328,6 +276,8 @@ def format_prompt_for_model(past_feedback: List[GuessFeedback], system_prompt: s
             continue
 
         # For all other guesses (in or out of dictionary), format the standard feedback
+        # We need to keep the guess even if it's not in the dictionary since it will still give the model feedback.
+        # we add a note about it below to the model.
         feedback_parts = fb.feedback.split()
         feedback_str = " ".join([f"{fb.guess[j]}({f})" for j, f in enumerate(feedback_parts)])
         line = f"* Guess {i+1}: {fb.guess} \u2192 {feedback_str}"
@@ -363,7 +313,6 @@ def _reconstruct_past_feedback(messages: list, secret_word: str) -> List[GuessFe
             guess = parse_guess(msg.get("content", ""))
             if guess:
                 # Re-calculate the feedback to ensure it's in the correct format.
-                # This is simpler and more reliable than parsing feedback from a string.
                 feedback = get_feedback(guess, secret_word)
                 past_feedback.append(feedback)
     return past_feedback
@@ -378,16 +327,29 @@ def play_wordle_game(
     initial_history: list = None
 ) -> GameRollout:
     """
-    Plays a game of Wordle using a self-contained reward system.
-    This version contains fixes for more precise and helpful feedback.
+    Plays a game of Wordle with rl.num_generations, calculate the total rewards for each generation,
+    and returns the full game rollout including all attempts and the final outcome.
+
+    Args:
+        model: The language model to use for generating guesses.
+        tokenizer: The tokenizer corresponding to the model.
+        secret_word: The secret word to be guessed in this game.
+        system_prompt: The system prompt to guide the model's behavior.
+        config: Configuration parameters for the RL training and game settings.
+        sampler: The sampling strategy to use for generation (e.g., temperature, top-k).
+        initial_history: Optional initial history of past guesses and feedback to continue from.
+
+    Returns:
+        A GameRollout object containing the full history of attempts and whether the game was solved.
     """
     game_rollout = GameRollout(secret_word=secret_word)
     past_feedback: List[GuessFeedback] = []
     already_guessed_words = set()
     max_trials = config.rl.max_trials
     num_generations = config.rl.num_generations
-    print("DEBUG: Starting game with secret word:", secret_word)
+    print("\nDEBUG: Starting game with secret word:", secret_word)
 
+    # This is provided by the dataset for continuing games.
     if initial_history:
         past_feedback = _reconstruct_past_feedback(initial_history, secret_word)
         for fb in past_feedback:
@@ -397,6 +359,7 @@ def play_wordle_game(
         if any(fb.guess == secret_word.upper() for fb in past_feedback):
              return game_rollout
 
+    # Main game loop start from initial history length to max trials
     for attempt_num in range(len(past_feedback), max_trials):
         messages = format_prompt_for_model(past_feedback, system_prompt)
         prompt_string = tokenizer.apply_chat_template(
@@ -415,9 +378,10 @@ def play_wordle_game(
         current_turn_attempts: List[GenerationAttempt] = []
         for response in generations:
             response_only = response.replace(prompt_string, "").strip()
+            print("DEBUG: Raw model response:\n", response_only)
             guess = parse_guess(response_only)
 
-            # The reward function now checks for the win condition first.
+            # The reward function checks for the win condition first.
             reward = calculate_total_reward(
                 response_only, secret_word, past_feedback, config, ALLOWED_GUESSES
             )
@@ -427,7 +391,7 @@ def play_wordle_game(
                 prompt_tokens=prompt_tokens,
                 full_response=response_only,
                 response_tokens=tokenizer.encode(response_only),
-                parsed_guess=guess, # This will be the word string or None
+                parsed_guess=guess,
                 reward=reward,
                 feedback_given=None
             )
@@ -445,11 +409,11 @@ def play_wordle_game(
             game_rollout.attempts.extend(current_turn_attempts)
             break
 
-        # 4. Select the best candidate from the VALID ones to advance the game state
+        # Select the best candidate from the VALID ones to advance the game state
         best_attempt = max(valid_candidates, key=lambda att: att.reward)
         best_guess = best_attempt.parsed_guess
 
-        # 5. Generate and append feedback for the chosen path
+        # Generate and append feedback for the chosen path
         is_valid_in_dict = is_valid_guess(best_guess, ALLOWED_GUESSES)
         feedback = get_feedback(best_guess, secret_word)
         feedback.is_in_dictionary = is_valid_in_dict
@@ -466,7 +430,7 @@ def play_wordle_game(
 
         # 6. Check for game termination
         if best_guess == secret_word.upper():
-            print(f"🎉 SUCCESS on attempt {attempt_num + 1}! Word: '{secret_word.upper()}'")
+            print(f"🎉🎉🎉 SUCCESS on attempt {attempt_num + 1}! Word: '{secret_word.upper()}' 🎉🎉🎉")
             game_rollout.solved = True
             break
             
