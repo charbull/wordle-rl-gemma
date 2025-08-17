@@ -8,7 +8,7 @@
         "batch_size": 16,
         "log_steps": 10,
         "checkpoint_steps": 50,
-        "resume_from_checkpoint": "",
+        "resume_from_checkpoint": "./adapters/grpo_lora_wordle/grpo_lora_wordle_50_20250816-214404.npz",
         "save_adapter_to": "./adapters/grpo_lora_wordle",
         "config_file": "./config/grpo_lora_config.json"
     },

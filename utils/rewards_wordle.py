@@ -209,16 +209,17 @@ def is_valid_guess(guess, allowed_words):
         )
 
 
-
-
 def format_prompt_for_model(past_feedback: List[GuessFeedback], system_prompt: str) -> List[dict]:
     """
-    Formats the history of guesses into a clean state summary for the model.
+    Formats the history of guesses into a clean state summary, including a list
+    of used words and a very explicit final instruction.
     """
     if not past_feedback:
         user_content = "This is the first turn. Please provide your best starting word."
         return [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_content}]
 
+    # --- State-building logic (remains the same) ---
+    # ... (all the state building logic is correct and stays here) ...
     known_green = {}
     known_yellow = Counter()
     known_gray = set()
@@ -246,32 +247,41 @@ def format_prompt_for_model(past_feedback: List[GuessFeedback], system_prompt: s
             del known_yellow[letter]
         if letter in known_gray:
             known_gray.remove(letter)
-    prompt_parts = ["**Current Knowledge:**"]
+    # --- End of state-building logic ---
+
+
+    # --- Format the state into a clean prompt ---
+    prompt_parts = ["You are playing a game of Wordle. Analyze the clues and provide your next guess.",
+                    "**Current Knowledge:**"]
     
-    # Format Green letters
     green_display = ['_'] * 5
     for idx, letter in known_green.items():
         green_display[idx] = letter
-    prompt_parts.append(f"*   **Green Letters (Correct Position):** `{' '.join(green_display)}`")
+    prompt_parts.append(f"*   **Correct Position (Green):** `{' '.join(green_display)}`")
 
-    # Format Yellow letters
     if known_yellow:
         yellow_display = [f"'{k}' (at least {v})" for k, v in sorted(known_yellow.items())]
-        prompt_parts.append(f"*   **Yellow Letters (In word, wrong position):** {', '.join(yellow_display)}")
+        prompt_parts.append(f"*   **Wrong Position (Yellow):** {', '.join(yellow_display)}")
     else:
-        prompt_parts.append(f"*   **Yellow Letters (In word, wrong position):** None")
+        prompt_parts.append(f"*   **Wrong Position (Yellow):** None")
         
-    # Format Gray letters
     if known_gray:
         gray_display = sorted(list(known_gray))
-        prompt_parts.append(f"*   **Gray Letters (Not in word):** {', '.join(gray_display)}")
+        prompt_parts.append(f"*   **Not in Word (Gray):** {', '.join(gray_display)}")
     else:
-        prompt_parts.append(f"*   **Gray Letters (Not in word):** None")
+        prompt_parts.append(f"*   **Not in Word (Gray):** None")
 
-    prompt_parts.append("\nBased on this summary, what is your next guess?")
+    past_guesses = [fb.guess for fb in past_feedback]
+    prompt_parts.append(f"*   **Words Already Guessed:** {', '.join(past_guesses)}")
+    
+    # --- REFINED INSTRUCTION ---
+    prompt_parts.append("\nYour task is to find a valid 5-letter English word that fits all the clues above.")
+    prompt_parts.append("Provide your reasoning within <think> tags, and then your final guess within <guess> tags.")
+    # -------------------------
     
     user_content = "\n".join(prompt_parts)
     return [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_content}]
+
 
 def _reconstruct_past_feedback(messages: list, secret_word: str) -> List[GuessFeedback]:
     """

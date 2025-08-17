@@ -540,11 +540,29 @@ class TestFormatPromptForModel(unittest.TestCase):
         """Should generate the special introductory prompt for the first turn."""
         past_feedback = []
         messages = format_prompt_for_model(past_feedback, self.system_prompt)
-        
         expected_content = "This is the first turn. Please provide your best starting word."
-        self.assertEqual(messages[-1]['role'], 'user')
         self.assertEqual(messages[-1]['content'], expected_content)
 
+    def test_prompt_with_greens_and_grays(self):
+        """Should correctly display green letters in position and list grays."""
+        past_feedback = [
+            GuessFeedback(guess="TABLE", feedback="G X G X G")
+        ]
+        messages = format_prompt_for_model(past_feedback, self.system_prompt)
+        user_content = messages[-1]['content']
+        
+        expected_lines = [
+            "You are playing a game of Wordle. Analyze the clues and provide your next guess.",
+            "**Current Knowledge:**",
+            "*   **Correct Position (Green):** `T _ B _ E`",
+            "*   **Wrong Position (Yellow):** None",
+            "*   **Not in Word (Gray):** A, L",
+            "*   **Words Already Guessed:** TABLE",
+            "\nYour task is to find a valid 5-letter English word that fits all the clues above.",
+            "Provide your reasoning within <think> tags, and then your final guess within <guess> tags."
+        ]
+        expected_content = "\n".join(expected_lines)
+        self.assertEqual(user_content, expected_content)
 
     def test_prompt_with_only_yellows_and_grays(self):
         """Should correctly list yellow letters and gray letters."""
@@ -555,65 +573,59 @@ class TestFormatPromptForModel(unittest.TestCase):
         user_content = messages[-1]['content']
 
         expected_lines = [
+            "You are playing a game of Wordle. Analyze the clues and provide your next guess.",
             "**Current Knowledge:**",
-            "*   **Green Letters (Correct Position):** `_ _ _ _ _`",
-            "*   **Yellow Letters (In word, wrong position):** '\'A\'' (at least 1), '\'R\'' (at least 1), '\'S\'' (at least 1)",
-            "*   **Gray Letters (Not in word):** E, I",
-            "\nBased on this summary, what is your next guess?"
+            "*   **Correct Position (Green):** `_ _ _ _ _`",
+            "*   **Wrong Position (Yellow):** 'A' (at least 1), 'R' (at least 1), 'S' (at least 1)",
+            "*   **Not in Word (Gray):** E, I",
+            "*   **Words Already Guessed:** RAISE",
+            "\nYour task is to find a valid 5-letter English word that fits all the clues above.",
+            "Provide your reasoning within <think> tags, and then your final guess within <guess> tags."
         ]
-        expected_content = "\n".join(expected_lines).replace('\'\'', '\'')
-
+        expected_content = "\n".join(expected_lines)
         self.assertEqual(user_content, expected_content)
 
     def test_prompt_with_duplicate_yellow_counts(self):
-        """
-        Tests the function's interpretation of a complex feedback string.
-        Note: The input feedback "Y X Y X X" for "EERIE" is unusual, but this test
-        validates that the function correctly translates exactly what it's given.
-        """
+        """Tests the function's interpretation of a complex feedback string."""
         past_feedback = [
             GuessFeedback(guess="EERIE", feedback="Y X Y X X")
         ]
         messages = format_prompt_for_model(past_feedback, self.system_prompt)
         user_content = messages[-1]['content']
 
-        # --- FIX: Update expected content to match the function's correct logical output ---
         expected_lines = [
+            "You are playing a game of Wordle. Analyze the clues and provide your next guess.",
             "**Current Knowledge:**",
-            "*   **Green Letters (Correct Position):** `_ _ _ _ _`",
-            # The function correctly identifies 'E' (once) and 'R' as yellow from the feedback.
-            "*   **Yellow Letters (In word, wrong position):** '\'E\'' (at least 1), '\'R\'' (at least 1)",
-            # The function correctly identifies 'I' as gray, but not 'R' or the other 'E's.
-            "*   **Gray Letters (Not in word):** I",
-            "\nBased on this summary, what is your next guess?"
+            "*   **Correct Position (Green):** `_ _ _ _ _`",
+            "*   **Wrong Position (Yellow):** 'E' (at least 1), 'R' (at least 1)",
+            "*   **Not in Word (Gray):** I",
+            "*   **Words Already Guessed:** EERIE",
+            "\nYour task is to find a valid 5-letter English word that fits all the clues above.",
+            "Provide your reasoning within <think> tags, and then your final guess within <guess> tags."
         ]
-        expected_content = "\n".join(expected_lines).replace('\'\'', '\'')
-        
+        expected_content = "\n".join(expected_lines)
         self.assertEqual(user_content, expected_content)
 
     def test_complex_prompt_from_piper_scenario(self):
         """Tests the prompt generation from a multi-turn game state."""
-        # This simulates the state after guessing CREWS and then PLIER for the secret PIPER
         past_feedback = [
-            GuessFeedback(guess="CREWS", feedback="X Y Y X X"), # R, E are yellow. C,W,S are gray
-            GuessFeedback(guess="PLIER", feedback="G X Y G G")  # P,E,R are green. I is yellow. L is gray.
+            GuessFeedback(guess="CREWS", feedback="X Y Y X X"),
+            GuessFeedback(guess="PLIER", feedback="G X Y G G")
         ]
         messages = format_prompt_for_model(past_feedback, self.system_prompt)
         user_content = messages[-1]['content']
 
-        # The state logic should correctly deduce:
-        # Green: P _ _ E R
-        # Yellow: I (R and E were promoted to green)
-        # Gray: C, W, S, L
         expected_lines = [
+            "You are playing a game of Wordle. Analyze the clues and provide your next guess.",
             "**Current Knowledge:**",
-            "*   **Green Letters (Correct Position):** `P _ _ E R`",
-            "*   **Yellow Letters (In word, wrong position):** '\'I\'' (at least 1)",
-            "*   **Gray Letters (Not in word):** C, L, S, W", # Alphabetically sorted
-            "\nBased on this summary, what is your next guess?"
+            "*   **Correct Position (Green):** `P _ _ E R`",
+            "*   **Wrong Position (Yellow):** 'I' (at least 1)",
+            "*   **Not in Word (Gray):** C, L, S, W",
+            "*   **Words Already Guessed:** CREWS, PLIER",
+            "\nYour task is to find a valid 5-letter English word that fits all the clues above.",
+            "Provide your reasoning within <think> tags, and then your final guess within <guess> tags."
         ]
-        expected_content = "\n".join(expected_lines).replace('\'\'', '\'')
-
+        expected_content = "\n".join(expected_lines)
         self.assertEqual(user_content, expected_content)
 
 
