@@ -17,7 +17,7 @@ def load_word_list_from_url(url: str, output_path: str) -> Set[str]:
         if os.path.exists(output_path):
             print(f"File found reading locally: {output_path}")
             with open(output_path, "r") as f:
-                words = [line.strip() for line in f]
+                words = {line.strip().upper() for line in f if line.strip()}
             if words:
                 return words
                 

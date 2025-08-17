@@ -174,9 +174,10 @@ def grpo_loss_and_grad(
     # 6. Add a KL divergence penalty to stabilize training
     # This penalizes the policy for moving too far from the reference on the "good" examples
     # TODO : consider removing this as mixtral removed it in https://arxiv.org/pdf/2506.10910
-    kl_div = mx.mean(log_probs_policy_winner - log_probs_ref_winner)
-    
-    loss = grpo_loss + config.grpo.kl_coeff * kl_div
+    kl_div = mx.mean(log_probs_ref_winner - log_probs_policy_winner)
+    kl_penalty = mx.maximum(0, kl_div)
+
+    loss = grpo_loss + config.grpo.kl_coeff * kl_penalty
     return loss
 
 # ==============================================================================

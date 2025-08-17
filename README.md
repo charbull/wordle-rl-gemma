@@ -19,7 +19,20 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
+## Run Calculate Enthropy offline
+```sh
+python3 calculate_word_entropy_mlx.py
+```
+
+
+
 ## Run training
 ```sh
 python3 train_gemma_rl.py 
+```
+
+
+## Run unit tests
+```sh
+python3 -m unittest
 ```

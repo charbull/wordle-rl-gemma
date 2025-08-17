@@ -8,7 +8,7 @@
 # 3) total_reward(completion: str, sample: dict, config: cfg.TrainerConfig) -> float:
 # This function should calculate the total reward for a given completion based on the sample and configuration.
 #######
-
+import json
 import config as cfg
 from collections import Counter
 import re
@@ -23,73 +23,14 @@ from utils import config as cfg
 # ==============================================================================
 URL_POSSIBLE_ANSWERS = "https://gist.githubusercontent.com/kcwhite/bb598f1b3017b5477cb818c9b086a5d9/raw/5a0adbbb9830ed93a573cb87a7c14bb5dd0b1883/wordle_possibles.txt"
 LOCAL_FILE_PATH = "./data/nyt_possible_wordle_list.txt"
-_ALLOWED_GUESSES_CACHE = None
 # --- Word Lists ---
 ALLOWED_GUESSES = read_files.load_word_list_from_url(URL_POSSIBLE_ANSWERS, LOCAL_FILE_PATH)
 GUESS_TAG_RE = re.compile(r"<guess>(.*?)</guess>", re.DOTALL | re.IGNORECASE)
 # This should only match 5 ALL-CAPS letters
 FIVE_LETTER_WORD_RE = re.compile(r'\b([A-Z]{5})\b')
 
-#============================================================================= 
-# --- Reward Calculation Helpers ---
-#=============================================================================
-# Pre-calculate letter frequencies based on the solution words for accuracy.
-# This only runs once when the script starts.
-# from collections import Counter
-LETTER_FREQUENCIES = Counter(
-    letter for word in ALLOWED_GUESSES for letter in word.upper()
-)
-MAX_FREQ = max(LETTER_FREQUENCIES.values())
-NORMALIZED_LETTER_FREQS = {
-    letter: freq / MAX_FREQ for letter, freq in LETTER_FREQUENCIES.items()
-}
 
-def get_allowed_guesses():
-    """
-    Loads the list of allowed guess words, caching the result after the first call.
-    This prevents file I/O from running on simple module import.
-    """
-    global _ALLOWED_GUESSES_CACHE
-    if _ALLOWED_GUESSES_CACHE is None:
-        print("--- Loading Wordle guess list for the first time... ---")
-        _ALLOWED_GUESSES_CACHE = read_files.load_word_list_from_url(
-            URL_POSSIBLE_ANSWERS, LOCAL_FILE_PATH
-        )
-    return _ALLOWED_GUESSES_CACHE
 
-def get_letter_frequencies():
-    """Calculates and caches letter frequencies based on the solution words."""
-    global NORMALIZED_LETTER_FREQS # Assuming this is the name you want
-    # Check if it's already calculated, if not, compute it
-    if "NORMALIZED_LETTER_FREQS" not in globals():
-        from collections import Counter
-        allowed_words = get_allowed_guesses()
-        letter_counts = Counter(letter for word in allowed_words for letter in word.upper())
-        max_freq = max(letter_counts.values()) if letter_counts else 1
-        # Declare as global to cache it
-        globals()["NORMALIZED_LETTER_FREQS"] = {
-            letter: freq / max_freq for letter, freq in letter_counts.items()
-        }
-    return globals()["NORMALIZED_LETTER_FREQS"]
-
-def reward_for_entropy_proxy(guess: str, config: cfg.TrainerConfig) -> float:
-    """
-    Calculates a reward bonus based on heuristics that approximate high-entropy
-    guesses: unique letters and common letters.
-    """
-    if not guess or len(guess) != 5:
-        return 0.0
-
-    # Bonus for number of unique letters
-    unique_letters = set(guess)
-    unique_bonus = (len(unique_letters) / 5.0) * config.reward.get("entropy_unique_letter_bonus")
-
-    # Bonus for using common letters, weighted by their frequency
-    common_letter_score = sum(NORMALIZED_LETTER_FREQS.get(letter, 0) for letter in unique_letters)
-    # Normalize by a typical score for a 5-unique-letter word to keep the bonus in a stable range
-    common_bonus = (common_letter_score / 3.5) * config.reward.get("entropy_common_letter_bonus")
-    
-    return unique_bonus + common_bonus
 
 @dataclass
 class GuessFeedback:
@@ -117,30 +58,110 @@ class GameRollout:
     secret_word: str = ""
     solved: bool = False
 
+from collections import Counter # Make sure this is at the top of your file
 def get_feedback(guess: str, secret_word: str) -> GuessFeedback:
     """
     Given a guess and the secret word, returns the feedback string in the format:
-    '✓' for correct position, '-' for correct letter wrong position, 'x' for incorrect letter.
-    Example: guess='CRANE', secret_word='CLEAN' -> feedback='✓ - ✓ x -'
+    'G' for correct position, 'Y' for correct letter wrong position, 'X' for incorrect letter.
     """
     guess = guess.upper()
     secret_word = secret_word.upper()
+    
     if len(guess) != 5:
         return GuessFeedback(guess, "INVALID_FORMAT")
+
     feedback = [''] * 5
     secret_counts = Counter(secret_word)
+
+    # First pass: Find all correct letters in the correct position (Greens)
     for i in range(5):
         if guess[i] == secret_word[i]:
-            feedback[i] = '✓'
+            feedback[i] = 'G'
             secret_counts[guess[i]] -= 1
+
+    # Second pass: Find correct letters in wrong positions (Yellows) and incorrect letters (Grays)
     for i in range(5):
-        if feedback[i] == '':
+        if feedback[i] == '':  # Only check letters that weren't green
             if guess[i] in secret_counts and secret_counts[guess[i]] > 0:
-                feedback[i] = '-'
+                feedback[i] = 'Y'
                 secret_counts[guess[i]] -= 1
             else:
-                feedback[i] = 'x'
+                feedback[i] = 'X'
+                
     return GuessFeedback(guess, " ".join(feedback))
+
+#============================================================================= 
+# --- Reward Enthropy Helpers ---
+#=============================================================================
+def load_word_entropy():
+    try:
+        with open('./data/word_entropy.json', 'r') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        print("!!! WARNING: word_entropy.json not found.                   !!!")
+        print("!!! Run `calculate_word_entropy_mlx.py` to generate it.     !!!")
+        print("!!! The information gain bonus will be zero for this run.   !!!")
+        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        return {}
+
+WORD_ENTROPY_SCORES = load_word_entropy()
+
+
+def reward_for_mid_game_exploration(guess: str, known_letters: set, config: cfg.TrainerConfig) -> float:
+    """
+    Provides a reward bonus for using new, unknown letters on turns 2-6.
+    This acts as a proxy for information gain when the solution space is smaller.
+    
+    Args:
+        guess (str): The current guess.
+        known_letters (set): A set of all letters that have appeared in previous
+                             guesses (greens, yellows, and grays).
+        config (cfg.TrainerConfig): The trainer configuration.
+        
+    Returns:
+        float: The calculated exploration bonus.
+    """
+    if not guess:
+        return 0.0
+    
+    # Find the letters in the current guess that have not been seen before.
+    new_letters = set(guess.upper()) - known_letters
+    num_new_letters = len(new_letters)
+    
+    # Provide a bonus for each new letter introduced.
+    return num_new_letters * config.reward.get("new_letter_bonus", 0.0)
+
+
+def get_strategic_bonus(guess: str, past_feedback: List[GuessFeedback], config: cfg.TrainerConfig) -> float:
+    """
+    Determines the appropriate strategic bonus based on the turn number.
+    - Turn 1: Uses pre-calculated, perfect information gain.
+    - Turns 2-6: Uses a proxy that rewards exploring new letters.
+    """
+    turn_number = len(past_feedback) + 1
+    
+    if turn_number == 1:
+        # On the first turn, use the most powerful tool we have.
+        return reward_for_information_gain(guess, config)
+    else:
+        # On subsequent turns, reward exploration of new letters.
+        
+        # First, gather all letters seen in previous guesses.
+        known_letters = set()
+        for fb in past_feedback:
+            known_letters.update(fb.guess.upper())
+            
+        return reward_for_mid_game_exploration(guess, known_letters, config)
+
+# We also need to slightly adjust reward_for_information_gain to not check the turn number
+def reward_for_information_gain(guess: str, config: cfg.TrainerConfig) -> float:
+    """Provides a reward based on pre-calculated information gain (entropy)."""
+    if not guess:
+        return 0.0
+    entropy_score = WORD_ENTROPY_SCORES.get(guess.upper(), 0.0)
+    return entropy_score * config.reward.get("information_gain_bonus_coeff")
+
 
 def format_prompt_from_dataset(sample):
     history_str = sample['past_guess_history']
@@ -183,97 +204,11 @@ def is_valid_guess(guess, allowed_words):
     Checks if the guess is a valid 5-letter word in the allowed words list.
     """
     return (
-        guess
-        and len(guess) == 5
-        and guess.isalpha()
-        and guess.upper() in {w.upper() for w in allowed_words}
-    )
+            guess and len(guess) == 5 and guess.isalpha() and
+            guess.upper() in allowed_words
+        )
 
-def calculate_total_reward(
-    response: str,
-    secret_word: str,
-    past_feedback: List[GuessFeedback],
-    config: cfg.TrainerConfig,
-    allowed_words: set,
-    tokenizer = None
-) -> tuple[float, float]: # Return a tuple of (game_score, training_reward)
-    """
-    Calculates a training_reward and a game score for a given model response.
-    - Prioritizes winning.
-    - Penalizes invalid/repeated guesses.
-    - Applies GRADUATED penalties for violating known clues.
-    - Rewards valid, consistent guesses with a base reward and an entropy bonus.
-    - Applies a small time penalty to every guess to encourage efficiency.
-    """
-    reward_config = config.reward
-    guess = parse_guess(response)
 
-    # These apply to the training_reward but not the game_score.
-    time_penalty = reward_config.get("time_penalty_per_guess", -1.0)
-    length_penalty = len(tokenizer.encode(response)) * reward_config.get("length_penalty_per_token", -0.01)
-
-    game_score = 0.0
-
-    # PRIORITY 1: Handle parsing and win condition
-    if not guess:
-        game_score = reward_config.get("format_fail_penalty")
-    elif guess == secret_word.upper():
-        game_score = reward_config.get("solution_correct_guess")
-        
-    # PRIORITY 2: Handle fundamental game rule violations
-    elif not is_valid_guess(guess, allowed_words) and \
-          reward_config.get("not_in_dictionary_penalty") != 0.0:
-        game_score = reward_config.get("not_in_dictionary_penalty")
-    elif any(fb.guess == guess for fb in past_feedback):
-        game_score = reward_config.get("repetition_penalty")
-    else:
-        # PRIORITY 3: If the guess is valid, new, and not a win, check for logical clue violations.
-        known_green = {}   # {position: letter}
-        known_yellow = set() # Set of letters that are yellow
-        known_gray = set()   # Set of letters that are gray
-
-        # This loop correctly populates the clue sets.
-        for fb in past_feedback:
-            for i, f_char in enumerate(fb.feedback.split()):
-                letter = fb.guess[i]
-                if f_char == '✓':
-                    known_green[i] = letter
-                elif f_char == '-':
-                    known_yellow.add(letter)
-                elif f_char == 'x':
-                    known_gray.add(letter)
-        
-        # A letter cannot be both gray and yellow/green.
-        # This prevents double-penalizing.
-        known_gray -= set(known_green.values())
-        known_gray -= known_yellow
-
-        total_penalty = 0.0
-        
-        # 1. Calculate penalty for each gray letter used.
-        gray_violations = sum(1 for letter in guess if letter in known_gray)
-        total_penalty += gray_violations * reward_config.get("gray_letter_penalty", -5.0)
-
-        # 2. Calculate penalty for each yellow letter NOT used.
-        yellow_violations = sum(1 for letter in known_yellow if letter not in guess)
-        total_penalty += yellow_violations * reward_config.get("yellow_letter_penalty", -10.0)
-
-        # 3. Calculate penalty for each green letter in the wrong position.
-        green_violations = sum(1 for idx, letter in known_green.items() if guess[idx] != letter)
-        total_penalty += green_violations * reward_config.get("green_position_penalty", -15.0)
-
-        if total_penalty < 0:
-            game_score = total_penalty
-        else:
-            # PRIORITY 4: This is a "good" guess that follows all rules. Reward it.
-            base_reward = reward_config.get("valid_guess_base")
-            entropy_bonus = reward_for_entropy_proxy(guess, config)
-            game_score = base_reward + entropy_bonus
-
-    # Finally, calculate the full training_reward
-    training_reward = game_score + time_penalty + length_penalty
-    
-    return game_score, training_reward
 
 
 def format_prompt_for_model(past_feedback: List[GuessFeedback], system_prompt: str) -> List[dict]:
@@ -287,25 +222,39 @@ def format_prompt_for_model(past_feedback: List[GuessFeedback], system_prompt: s
     prompt_parts = ["**Clues so far:**"]
     
     for i, fb in enumerate(past_feedback):
-        # Handle hard errors like invalid format or repeated words first
+        # Handle errors like invalid format first
         if fb.guess in ["INVALID_FORMAT", "REPEATED_GUESS"]:
             prompt_parts.append(f"* Attempt {i+1} Error: {fb.feedback}")
             continue
 
         feedback_parts = fb.feedback.split()
         descriptions = []
-        correct_pos = [f"{fb.guess[j]}" for j, f in enumerate(feedback_parts) if f == '✓']
-        wrong_pos = [f"{fb.guess[j]}" for j, f in enumerate(feedback_parts) if f == '-']
-        not_in_word = [f"{fb.guess[j]}" for j, f in enumerate(feedback_parts) if f == 'x']
+        
+        # --- FIX: Use the correct 'G', 'Y', 'X' characters ---
+        correct_pos = [f"'{fb.guess[j]}'" for j, f in enumerate(feedback_parts) if f == 'G']
+        wrong_pos = [f"'{fb.guess[j]}'" for j, f in enumerate(feedback_parts) if f == 'Y']
+        not_in_word = [f"'{fb.guess[j]}'" for j, f in enumerate(feedback_parts) if f == 'X']
 
+        # To make the prompt even clearer, let's describe the positions for green letters
         if correct_pos:
-            descriptions.append(f"{', '.join(correct_pos)} are in the correct position.")
-        if wrong_pos:
-            descriptions.append(f"{', '.join(wrong_pos)} are in the word, but in the wrong position.")
-        if not_in_word:
-            descriptions.append(f"{', '.join(not_in_word)} are not in the word.")
+            green_descriptions = []
+            for j, f in enumerate(feedback_parts):
+                if f == 'G':
+                    # Add 1 for human-readable position (1st, 2nd, etc.)
+                    green_descriptions.append(f"'{fb.guess[j]}' is in position {j + 1}")
+            descriptions.append(" ".join(green_descriptions) + ".")
 
-        feedback_str = " ".join(descriptions) if descriptions else "No information gained."
+        if wrong_pos:
+            # Use set to avoid duplicates in description, e.g., "E is in the word" not "E, E are in the word"
+            unique_wrong_pos = sorted(list(set(wrong_pos)))
+            descriptions.append(f"{', '.join(unique_wrong_pos)} are in the word but in the wrong position.")
+            
+        if not_in_word:
+            # Use set to avoid duplicates
+            unique_not_in_word = sorted(list(set(not_in_word)))
+            descriptions.append(f"{', '.join(unique_not_in_word)} are not in the word.")
+
+        feedback_str = " ".join(descriptions) if descriptions else "No information gained." # Fallback just in case
         line = f"* Guess {i+1}: {fb.guess} → {feedback_str}"
         prompt_parts.append(line)
     
@@ -336,6 +285,175 @@ def _reconstruct_past_feedback(messages: list, secret_word: str) -> List[GuessFe
                 feedback = get_feedback(guess, secret_word)
                 past_feedback.append(feedback)
     return past_feedback
+
+
+def calculate_stagnation_penalty(guess: str, known_green: dict, known_yellow: Counter, config: cfg.TrainerConfig) -> float:
+    """
+    Calculates a penalty for re-using known information inefficiently.
+    - Penalizes placing a known green letter in its correct spot again.
+    - Penalizes re-using any known yellow letter.
+    """
+    penalty = 0.0
+    
+    # Penalize reusing green letters in their known correct positions
+    green_reuse_penalty = config.reward.get("green_reuse_penalty")
+    for idx, letter in known_green.items():
+        if guess[idx] == letter:
+            penalty += green_reuse_penalty
+
+    # Penalize reusing yellow letters (encourages using new letters to find other yellows/greens)
+    yellow_reuse_penalty = config.reward.get("yellow_reuse_penalty")
+    for letter in set(guess):
+        if letter in known_yellow:
+            penalty += yellow_reuse_penalty
+            
+    return penalty
+
+def calculate_total_reward(
+    response: str,
+    secret_word: str,
+    past_feedback: List[GuessFeedback],
+    config: cfg.TrainerConfig,
+    allowed_words: set,
+    tokenizer = None
+) -> tuple[float, float]: # Return a tuple of (game_score, training_reward)
+    """
+    Calculates a training_reward and a game score for a given model response.
+    - Prioritizes winning.
+    - Penalizes invalid/repeated guesses.
+    - Applies penalties for violating known clues.
+    - Rewards valid, consistent guesses with a base reward and an entropy.
+    - Applies a small time penalty to every guess to encourage efficiency.
+
+    Args:
+        response: The full text response from the model (after the prompt).
+        secret_word: The secret word to be guessed in this game.
+        past_feedback: List of GuessFeedback objects representing previous guesses and feedback.
+        config: The TrainerConfig containing reward parameters.
+        allowed_words: Set of valid 5-letter words for guesses.
+        tokenizer: The tokenizer to calculate length penalties.
+    Returns:
+        A tuple of (game_score, training_reward). The game_score is based solely on the guess quality, 
+            the training_reward includes time and length penalties for the loss function.
+    """
+    reward_config = config.reward
+    guess = parse_guess(response)
+
+    # --- Behavioral Penalties ---
+    time_penalty = -reward_config.get("time_penalty_per_guess", 1.0)
+    length_penalty = 0.0
+    if tokenizer and response:
+        length_penalty = -(len(tokenizer.encode(response)) * reward_config.get("length_penalty_per_token", 0.01))
+
+    # --- PRIORITY 1 & 2: Handle Game Rule Violations (immediate return) ---
+    if not guess:
+        game_score = -reward_config.get("format_fail_penalty", 120.0)
+        return game_score, game_score + time_penalty + length_penalty
+
+    if guess == secret_word.upper():
+        game_score = reward_config.get("solution_correct_guess", 150.0)
+        return game_score, game_score + time_penalty + length_penalty
+        
+    if any(fb.guess == guess for fb in past_feedback):
+        game_score = -reward_config.get("repetition_penalty", 30.0)
+        return game_score, game_score + time_penalty + length_penalty
+
+    # --- PRIORITY 3: Strategic Score Calculation ---
+    # 1. Build a correct, consistent clue state from history.
+    known_green = {}  # {index: letter}
+    # Use a Counter for yellow letters to handle duplicates correctly.
+    known_yellow = Counter()
+    known_gray = set()
+
+    for fb in past_feedback:
+        guess_letters = list(fb.guess)
+        feedback_chars = fb.feedback.split()
+        
+        # This counter tracks letters that are green or yellow IN THIS SPECIFIC GUESS.
+        # This is crucial for correctly identifying which 'X' letters are truly gray.
+        counts_in_secret_this_turn = Counter()
+
+        # First pass: Identify all Green and Yellow letters in this turn to establish counts
+        for i in range(5):
+            letter = guess_letters[i]
+            if feedback_chars[i] in ('G', 'Y'):
+                counts_in_secret_this_turn[letter] += 1
+        
+        # Update the global minimum required count for yellow letters
+        for letter, count in counts_in_secret_this_turn.items():
+            known_yellow[letter] = max(known_yellow[letter], count)
+
+        # Second pass: Process all clues to update the global state
+        for i in range(5):
+            letter = guess_letters[i]
+            feedback = feedback_chars[i]
+
+            if feedback == 'G':
+                known_green[i] = letter
+            elif feedback == 'X':
+                # A letter is only truly gray if it wasn't found as Green or Yellow
+                # anywhere in this guess.
+                if counts_in_secret_this_turn[letter] == 0:
+                    known_gray.add(letter)
+
+    # 2. Crucial Cleanup Step: Finalize the clue state.
+    # A letter that is confirmed Green is the highest truth. It cannot also be
+    # considered a yellow or gray constraint.
+    green_letters = set(known_green.values())
+    for letter in green_letters:
+        if letter in known_yellow:
+            del known_yellow[letter] # No longer a 'yellow' constraint
+        if letter in known_gray:
+            known_gray.remove(letter) # Cannot be gray if it's green
+
+    # 3. Calculate violations based on the clean, final clue state.
+    green_violations = 0
+    for idx, correct_letter in known_green.items():
+        if guess[idx] != correct_letter:
+            green_violations += 1
+
+    yellow_violations = 0
+    guess_counts = Counter(guess)
+    # Check if the guess has at least the required number of each yellow letter
+    for yellow_letter, required_count in known_yellow.items():
+        if guess_counts[yellow_letter] < required_count:
+            yellow_violations += 1
+            
+    gray_violations = 0
+    # Iterate over unique letters to avoid double-penalizing
+    for letter_in_guess in set(guess):
+        if letter_in_guess in known_gray:
+            gray_violations += 1
+
+    # 4. Calculate total penalty from violations.
+    total_penalty = 0.0
+    total_penalty += green_violations * reward_config.get("green_position_penalty", 20.0)
+    total_penalty += yellow_violations * reward_config.get("yellow_letter_penalty", 15.0)
+    total_penalty += gray_violations * reward_config.get("gray_letter_penalty", 15.0)
+
+    # 5. Add soft penalty for out-of-dictionary words.
+    if not is_valid_guess(guess, allowed_words):
+        total_penalty += reward_config.get("not_in_dictionary_penalty", 25.0)
+
+    # 6. Calculate potential score.
+    stagnation_penalty = calculate_stagnation_penalty(guess, known_green, known_yellow, config)
+    total_penalty += stagnation_penalty
+    strategic_bonus = get_strategic_bonus(guess, past_feedback, config)
+    potential_score = reward_config.get("valid_guess_base", 10.0) + strategic_bonus
+    
+    # 7. Calculate final scores.
+    game_score = potential_score - total_penalty
+    training_reward = game_score + time_penalty + length_penalty
+    
+    # Debug print
+    print(f"--- REWARD DEBUG ---")
+    print(f"  Guess: {guess}, Secret: {secret_word}")
+    print(f"  Violations (G/Y/X): {green_violations}/{yellow_violations}/{gray_violations}")
+    print(f"  Final Game Score: {game_score:.2f}")
+    print(f"--------------------")
+    
+    return game_score, training_reward
+
 
 def play_wordle_game(
     model,
@@ -454,6 +572,9 @@ def play_wordle_game(
         is_valid_in_dict = is_valid_guess(best_guess, ALLOWED_GUESSES)
         feedback = get_feedback(best_guess, secret_word)
         feedback.is_in_dictionary = is_valid_in_dict
+
+        print(f"DEBUG_PLAY_WORDLE: For guess '{best_guess}' against secret '{secret_word}'," 
+              f" generated feedback is '{feedback.feedback}'")
         
         if print_debug:
             print("\nTurn Decision:")
@@ -484,12 +605,9 @@ def play_wordle_game(
             # Group all generated attempts by their prompt, which represents a single turn.
             grouped_by_turn = defaultdict(list)
             for attempt in game_rollout.attempts:
-                # We only care about attempts that produced a parsable guess for this summary
-                if attempt.parsed_guess:
-                    grouped_by_turn[attempt.prompt_string].append(attempt)
+                grouped_by_turn[attempt.prompt_string].append(attempt)
             
             # Ensure we process turns in the order they were played
-            # We do this by finding the original index of the first attempt for each turn's prompt
             turn_prompts = sorted(
                 grouped_by_turn.keys(), 
                 key=lambda p: game_rollout.attempts.index(grouped_by_turn[p][0])
@@ -501,17 +619,23 @@ def play_wordle_game(
                 if not attempts_for_turn:
                     continue
 
-                # The "winner" for this turn is the one with the highest game_score.
-                # This is the guess that was chosen to advance the game state.
-                winner = max(attempts_for_turn, key=lambda att: att.game_score)
-                
+                # --- FIX: Find the winner that was actually chosen ---
+                # The real winner is the one for which we generated feedback to advance the game.
+                winner = next((att for att in attempts_for_turn if att.feedback_given is not None), None)
+
+                # If no winner was chosen (e.g., game ended early), fall back to max score
+                if winner is None:
+                    # This might happen if the game ended because no valid candidates were generated.
+                    # In this case, showing the best of the invalid attempts is reasonable.
+                    winner = max(attempts_for_turn, key=lambda att: att.game_score)
+
                 # "Losers" are all other generated candidates for this turn.
                 losers = [att for att in attempts_for_turn if att is not winner]
 
                 # Format the strings for clean printing
                 winner_str = f"'{winner.parsed_guess}' (Score: {winner.game_score:.2f})"
                 if losers:
-                    losers_str_list = [f"'{l.parsed_guess}' ({l.game_score:.2f})" for l in losers]
+                    losers_str_list = [f"'{l.parsed_guess}' ({l.game_score:.2f})" for l in losers if l.parsed_guess]
                     losers_str = ", ".join(losers_str_list)
                 else:
                     losers_str = "None (only one generation)"
