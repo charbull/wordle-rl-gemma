@@ -186,12 +186,10 @@ def get_named_parameters_flat(model_params: dict, prefix: str = ''):
     return flat_params
 
 
+# TODO update to use safetensors
 def save_checkpoint(model: nn.Module, save_dir: str, checkpoint_file_name: str, step: str, timestamp: str):
     """
-    Saves the LoRA adapter weights as a .safetensors file.
-
-    Note: The 'extension' parameter from the function call is ignored to
-    ensure the correct .safetensors extension is used.
+    Saves the LoRA adapter weights as a .npz file.
     """
     os.makedirs(save_dir, exist_ok=True)
     # Get the trainable parameters (which are only the LoRA weights

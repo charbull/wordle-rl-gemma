@@ -215,18 +215,15 @@ def format_prompt_for_model(past_feedback: List[GuessFeedback], system_prompt: s
     """
     Formats the history of guesses into a clean state summary for the model.
     """
-    print("\n>>> DEBUG: Executing the NEW state-summary prompt function. <<<\an")
     if not past_feedback:
         user_content = "This is the first turn. Please provide your best starting word."
         return [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_content}]
 
-    # --- Use the same robust state-building logic from the reward function ---
     known_green = {}
     known_yellow = Counter()
     known_gray = set()
 
     for fb in past_feedback:
-        # ... (This logic is copied directly from the corrected reward function)
         counts_in_secret_this_turn = Counter()
         for i, f_char in enumerate(fb.feedback.split()):
             if f_char in ('G', 'Y'):
@@ -249,9 +246,6 @@ def format_prompt_for_model(past_feedback: List[GuessFeedback], system_prompt: s
             del known_yellow[letter]
         if letter in known_gray:
             known_gray.remove(letter)
-    # --- End of state-building logic ---
-
-    # --- Format the state into a clean prompt ---
     prompt_parts = ["**Current Knowledge:**"]
     
     # Format Green letters
@@ -333,7 +327,8 @@ def calculate_total_reward(
     past_feedback: List[GuessFeedback],
     config: cfg.TrainerConfig,
     allowed_words: set,
-    tokenizer = None
+    tokenizer = None,
+    print_debug: bool = False
 ) -> tuple[float, float]: # Return a tuple of (game_score, training_reward)
     """
     Calculates a training_reward and a game score for a given model response.
@@ -463,13 +458,13 @@ def calculate_total_reward(
     game_score = potential_score - total_penalty
     training_reward = game_score + time_penalty + length_penalty
     
-    # Debug print
-    print(f"--- REWARD DEBUG ---")
-    print(f"  Guess: {guess}, Secret: {secret_word}")
-    print(f"  Violations (G/Y/X): {green_violations}/{yellow_violations}/{gray_violations}")
-    print(f"  Final Game Score: {game_score:.2f}")
-    print(f"--------------------")
-    
+    if print_debug:
+        print(f"--- REWARD DEBUG ---")
+        print(f"  Guess: {guess}, Secret: {secret_word}")
+        print(f"  Violations (G/Y/X): {green_violations}/{yellow_violations}/{gray_violations}")
+        print(f"  Final Game Score: {game_score:.2f}")
+        print(f"--------------------")
+        
     return game_score, training_reward
 
 
@@ -591,7 +586,7 @@ def play_wordle_game(
         feedback = get_feedback(best_guess, secret_word)
         feedback.is_in_dictionary = is_valid_in_dict
 
-        print(f"DEBUG_PLAY_WORDLE: For guess '{best_guess}' against secret '{secret_word}'," 
+        print(f"DEBUG : PLAY_WORDLE: For guess '{best_guess}' against secret '{secret_word}'," 
               f" generated feedback is '{feedback.feedback}'")
         
         if print_debug:

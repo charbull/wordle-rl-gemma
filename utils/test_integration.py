@@ -81,7 +81,6 @@ class TestCheckpointResumeLogic(unittest.TestCase):
             
             expected_checkpoint_path = save_dir / f"{checkpoint_name}_{step}_{timestamp}.npz"
             self.assertTrue(expected_checkpoint_path.is_file(), "Checkpoint file was not created.")
-            # ----------------------------------------------------------------
 
             # 5. SIMULATE RESUME
             print("Step 5: Loading checkpoint into a new model...")
