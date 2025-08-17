@@ -24,6 +24,12 @@ pip install -r requirements.txt
 python3 calculate_word_entropy_mlx.py
 ```
 
+## Download the model
+
+
+```sh
+hf download mlx-community/gemma-3-4b-it-bf16
+```
 
 
 ## Run training
@@ -33,6 +39,7 @@ python3 train_gemma_rl.py
 
 
 ## Run unit tests
+
 ```sh
 python3 -m unittest
 ```

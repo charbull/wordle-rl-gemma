@@ -476,12 +476,12 @@ def train(config: cfg.TrainerConfig, system_prompt: str):
         pbar.set_postfix({
             "loss": f"{avg_loss:.3f}", 
             "reward": f"{avg_reward_this_step:.2f}",
-            "win%": f"{rolling_win_rate:.1f}"
+            "win%": f"{rolling_win_rate:.1f}\n"
         })
 
         # Logging
         if step_counter > 0 and step_counter % config.training.log_steps == 0:
-            print(f"\nStep {step_counter:04d} | Avg Train Loss: {avg_loss:.4f} | Avg Train Reward: {avg_reward_this_step:.4f}")
+            print(f"\nStep {step_counter:04d} | Avg Train Loss: {avg_loss:.4f} | Avg Train Reward: {avg_reward_this_step:.4f}\n")
             train_steps.append(step_counter)
             train_losses.append(avg_loss)
             train_avg_rewards.append(avg_reward_this_step)

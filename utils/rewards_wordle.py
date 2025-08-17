@@ -213,50 +213,68 @@ def is_valid_guess(guess, allowed_words):
 
 def format_prompt_for_model(past_feedback: List[GuessFeedback], system_prompt: str) -> List[dict]:
     """
-    Formats the history of guesses into a message list for the model.
+    Formats the history of guesses into a clean state summary for the model.
     """
+    print("\n>>> DEBUG: Executing the NEW state-summary prompt function. <<<\an")
     if not past_feedback:
         user_content = "This is the first turn. Please provide your best starting word."
         return [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_content}]
 
-    prompt_parts = ["**Clues so far:**"]
-    
-    for i, fb in enumerate(past_feedback):
-        # Handle errors like invalid format first
-        if fb.guess in ["INVALID_FORMAT", "REPEATED_GUESS"]:
-            prompt_parts.append(f"* Attempt {i+1} Error: {fb.feedback}")
-            continue
+    # --- Use the same robust state-building logic from the reward function ---
+    known_green = {}
+    known_yellow = Counter()
+    known_gray = set()
 
-        feedback_parts = fb.feedback.split()
-        descriptions = []
+    for fb in past_feedback:
+        # ... (This logic is copied directly from the corrected reward function)
+        counts_in_secret_this_turn = Counter()
+        for i, f_char in enumerate(fb.feedback.split()):
+            if f_char in ('G', 'Y'):
+                counts_in_secret_this_turn[fb.guess[i]] += 1
         
-        # --- FIX: Use the correct 'G', 'Y', 'X' characters ---
-        correct_pos = [f"'{fb.guess[j]}'" for j, f in enumerate(feedback_parts) if f == 'G']
-        wrong_pos = [f"'{fb.guess[j]}'" for j, f in enumerate(feedback_parts) if f == 'Y']
-        not_in_word = [f"'{fb.guess[j]}'" for j, f in enumerate(feedback_parts) if f == 'X']
+        for letter, count in counts_in_secret_this_turn.items():
+            known_yellow[letter] = max(known_yellow[letter], count)
 
-        # To make the prompt even clearer, let's describe the positions for green letters
-        if correct_pos:
-            green_descriptions = []
-            for j, f in enumerate(feedback_parts):
-                if f == 'G':
-                    # Add 1 for human-readable position (1st, 2nd, etc.)
-                    green_descriptions.append(f"'{fb.guess[j]}' is in position {j + 1}")
-            descriptions.append(" ".join(green_descriptions) + ".")
+        for i, f_char in enumerate(fb.feedback.split()):
+            letter = fb.guess[i]
+            if f_char == 'G':
+                known_green[i] = letter
+            elif f_char == 'X':
+                if counts_in_secret_this_turn[letter] == 0:
+                    known_gray.add(letter)
 
-        if wrong_pos:
-            # Use set to avoid duplicates in description, e.g., "E is in the word" not "E, E are in the word"
-            unique_wrong_pos = sorted(list(set(wrong_pos)))
-            descriptions.append(f"{', '.join(unique_wrong_pos)} are in the word but in the wrong position.")
-            
-        if not_in_word:
-            # Use set to avoid duplicates
-            unique_not_in_word = sorted(list(set(not_in_word)))
-            descriptions.append(f"{', '.join(unique_not_in_word)} are not in the word.")
+    green_letters = set(known_green.values())
+    for letter in green_letters:
+        if letter in known_yellow:
+            del known_yellow[letter]
+        if letter in known_gray:
+            known_gray.remove(letter)
+    # --- End of state-building logic ---
 
-        feedback_str = " ".join(descriptions) if descriptions else "No information gained." # Fallback just in case
-        line = f"* Guess {i+1}: {fb.guess} → {feedback_str}"
-        prompt_parts.append(line)
+    # --- Format the state into a clean prompt ---
+    prompt_parts = ["**Current Knowledge:**"]
+    
+    # Format Green letters
+    green_display = ['_'] * 5
+    for idx, letter in known_green.items():
+        green_display[idx] = letter
+    prompt_parts.append(f"*   **Green Letters (Correct Position):** `{' '.join(green_display)}`")
+
+    # Format Yellow letters
+    if known_yellow:
+        yellow_display = [f"'{k}' (at least {v})" for k, v in sorted(known_yellow.items())]
+        prompt_parts.append(f"*   **Yellow Letters (In word, wrong position):** {', '.join(yellow_display)}")
+    else:
+        prompt_parts.append(f"*   **Yellow Letters (In word, wrong position):** None")
+        
+    # Format Gray letters
+    if known_gray:
+        gray_display = sorted(list(known_gray))
+        prompt_parts.append(f"*   **Gray Letters (Not in word):** {', '.join(gray_display)}")
+    else:
+        prompt_parts.append(f"*   **Gray Letters (Not in word):** None")
+
+    prompt_parts.append("\nBased on this summary, what is your next guess?")
     
     user_content = "\n".join(prompt_parts)
     return [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_content}]

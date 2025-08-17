@@ -6,7 +6,8 @@ from utils.rewards_wordle import (
     calculate_total_reward,
     GuessFeedback,
     get_feedback,
-    calculate_stagnation_penalty
+    calculate_stagnation_penalty,
+    format_prompt_for_model
 )
 
 # A fake dictionary of entropy scores to be used by our mock.
@@ -20,7 +21,6 @@ FAKE_ENTROPY_SCORES = {
     "TRAIN": 5.80
 }
 
-# We patch the loaded dictionary at the CLASS level, so all tests use this fake data.
 @patch('utils.rewards_wordle.WORD_ENTROPY_SCORES', FAKE_ENTROPY_SCORES)
 class TestCalculateTotalReward(unittest.TestCase):
     def setUp(self):
@@ -62,7 +62,7 @@ class TestCalculateTotalReward(unittest.TestCase):
         self.secret_word = "SOLVE"
 
     # =====================================================================
-    # --- Tests for Game Rule Violations (Score is Replaced) ---
+    # --- Tests for Game Rule Violations ---
     # =====================================================================
 
     def test_correct_guess_is_winner(self):
@@ -515,7 +515,6 @@ class TestStagnationPenalty(unittest.TestCase):
         # --- Manually calculate the expected score ---
         # 1. Bonus: Turn 2. Known letters from 'ROOTS' are {R,O,T,S}.
         # Guess 'COOTS' introduces one new letter 'C'.
-        # FIX: The missing line is added here.
         bonus = 1 * self.mock_config.reward["new_letter_bonus"]
         potential_score = self.mock_config.reward["valid_guess_base"] + bonus # 10.0 + 1.5 = 11.5
         
@@ -528,6 +527,95 @@ class TestStagnationPenalty(unittest.TestCase):
         expected_game_score = potential_score - total_penalty # 11.5 - 1.7 = 9.8
         
         self.assertAlmostEqual(game_score, expected_game_score)
+
+
+
+class TestFormatPromptForModel(unittest.TestCase):
+
+    def setUp(self):
+        """Set up a mock system prompt for all tests."""
+        self.system_prompt = "You are a Wordle solving assistant."
+
+    def test_first_turn_prompt_is_correct(self):
+        """Should generate the special introductory prompt for the first turn."""
+        past_feedback = []
+        messages = format_prompt_for_model(past_feedback, self.system_prompt)
+        
+        expected_content = "This is the first turn. Please provide your best starting word."
+        self.assertEqual(messages[-1]['role'], 'user')
+        self.assertEqual(messages[-1]['content'], expected_content)
+
+
+    def test_prompt_with_only_yellows_and_grays(self):
+        """Should correctly list yellow letters and gray letters."""
+        past_feedback = [
+            GuessFeedback(guess="RAISE", feedback="Y Y X Y X")
+        ]
+        messages = format_prompt_for_model(past_feedback, self.system_prompt)
+        user_content = messages[-1]['content']
+
+        expected_lines = [
+            "**Current Knowledge:**",
+            "*   **Green Letters (Correct Position):** `_ _ _ _ _`",
+            "*   **Yellow Letters (In word, wrong position):** '\'A\'' (at least 1), '\'R\'' (at least 1), '\'S\'' (at least 1)",
+            "*   **Gray Letters (Not in word):** E, I",
+            "\nBased on this summary, what is your next guess?"
+        ]
+        expected_content = "\n".join(expected_lines).replace('\'\'', '\'')
+
+        self.assertEqual(user_content, expected_content)
+
+    def test_prompt_with_duplicate_yellow_counts(self):
+        """
+        Tests the function's interpretation of a complex feedback string.
+        Note: The input feedback "Y X Y X X" for "EERIE" is unusual, but this test
+        validates that the function correctly translates exactly what it's given.
+        """
+        past_feedback = [
+            GuessFeedback(guess="EERIE", feedback="Y X Y X X")
+        ]
+        messages = format_prompt_for_model(past_feedback, self.system_prompt)
+        user_content = messages[-1]['content']
+
+        # --- FIX: Update expected content to match the function's correct logical output ---
+        expected_lines = [
+            "**Current Knowledge:**",
+            "*   **Green Letters (Correct Position):** `_ _ _ _ _`",
+            # The function correctly identifies 'E' (once) and 'R' as yellow from the feedback.
+            "*   **Yellow Letters (In word, wrong position):** '\'E\'' (at least 1), '\'R\'' (at least 1)",
+            # The function correctly identifies 'I' as gray, but not 'R' or the other 'E's.
+            "*   **Gray Letters (Not in word):** I",
+            "\nBased on this summary, what is your next guess?"
+        ]
+        expected_content = "\n".join(expected_lines).replace('\'\'', '\'')
+        
+        self.assertEqual(user_content, expected_content)
+
+    def test_complex_prompt_from_piper_scenario(self):
+        """Tests the prompt generation from a multi-turn game state."""
+        # This simulates the state after guessing CREWS and then PLIER for the secret PIPER
+        past_feedback = [
+            GuessFeedback(guess="CREWS", feedback="X Y Y X X"), # R, E are yellow. C,W,S are gray
+            GuessFeedback(guess="PLIER", feedback="G X Y G G")  # P,E,R are green. I is yellow. L is gray.
+        ]
+        messages = format_prompt_for_model(past_feedback, self.system_prompt)
+        user_content = messages[-1]['content']
+
+        # The state logic should correctly deduce:
+        # Green: P _ _ E R
+        # Yellow: I (R and E were promoted to green)
+        # Gray: C, W, S, L
+        expected_lines = [
+            "**Current Knowledge:**",
+            "*   **Green Letters (Correct Position):** `P _ _ E R`",
+            "*   **Yellow Letters (In word, wrong position):** '\'I\'' (at least 1)",
+            "*   **Gray Letters (Not in word):** C, L, S, W", # Alphabetically sorted
+            "\nBased on this summary, what is your next guess?"
+        ]
+        expected_content = "\n".join(expected_lines).replace('\'\'', '\'')
+
+        self.assertEqual(user_content, expected_content)
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

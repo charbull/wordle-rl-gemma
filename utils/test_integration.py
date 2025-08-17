@@ -1,0 +1,102 @@
+import unittest
+import tempfile
+from pathlib import Path
+
+# MLX and model loading imports
+import mlx.core as mx
+import mlx.nn as nn
+import mlx.optimizers as optim
+from mlx.utils import tree_flatten, tree_unflatten
+from mlx_lm import load
+# Import your LoRA utility functions
+from utils import lora
+
+# --- A small, local model is required for this integration test ---
+MODEL_PATH = "mlx-community/gemma-3-4b-it-bf16" 
+
+
+def get_lora_params(model: nn.Module) -> dict:
+    """Extracts only the LoRA parameters from a model."""
+    return {k: v for k, v in tree_flatten(model.parameters()) if "lora" in k}
+
+def compare_params(params1: dict, params2: dict) -> bool:
+    """Returns True if two dictionaries of MLX parameters are identical."""
+    if params1.keys() != params2.keys():
+        print("Parameter keys do not match.")
+        return False
+    for key in params1:
+        if not mx.all(mx.equal(params1[key], params2[key])):
+            print(f"Parameter mismatch for key: {key}")
+            return False
+    return True
+
+class TestCheckpointResumeLogic(unittest.TestCase):
+
+    def test_save_and_resume_workflow(self):
+        """
+        Verifies the full cycle of training, saving, loading, and resuming,
+        accounting for random weight initialization.
+        """
+        lora_config = {"rank": 8, "alpha": 16, "dropout": 0.0}
+        layers_to_tune = 16
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            save_dir = Path(tmpdir)
+            
+            # 1. SETUP
+            print("\nStep 1: Setting up initial model...")
+            model_to_train, _ = load(MODEL_PATH)
+            model_to_train = lora.apply_lora_to_model(model_to_train, lora_config, layers_to_tune)
+            initial_lora_params = get_lora_params(model_to_train)
+            self.assertTrue(len(initial_lora_params) > 0, "LoRA layers were not applied correctly.")
+
+            # 2. SIMULATE TRAINING
+            print("Step 2: Simulating a training step...")
+            optimizer = optim.AdamW(learning_rate=1e-4)
+            fake_grads = {k: mx.random.normal(v.shape) for k, v in initial_lora_params.items()}
+            
+            updated_params = optimizer.apply_gradients(fake_grads, initial_lora_params)
+            model_to_train.update(tree_unflatten(list(updated_params.items())))
+            mx.eval(model_to_train.parameters())
+
+            # 3. VERIFY CHANGE
+            print("Step 3: Verifying that model weights have changed...")
+            trained_lora_params = get_lora_params(model_to_train)
+            self.assertFalse(compare_params(initial_lora_params, trained_lora_params),
+                             "Model weights should be different after a training step.")
+
+            # 4. SAVE CHECKPOINT
+            print(f"Step 4: Saving checkpoint to directory {save_dir}...")
+            checkpoint_name = "test_adapter"
+            step = "1"
+            timestamp = "test_time"
+            
+            lora.save_checkpoint(
+                model=model_to_train, 
+                save_dir=str(save_dir), 
+                checkpoint_file_name=checkpoint_name,
+                step=step,
+                timestamp=timestamp
+            )
+            
+            expected_checkpoint_path = save_dir / f"{checkpoint_name}_{step}_{timestamp}.npz"
+            self.assertTrue(expected_checkpoint_path.is_file(), "Checkpoint file was not created.")
+            # ----------------------------------------------------------------
+
+            # 5. SIMULATE RESUME
+            print("Step 5: Loading checkpoint into a new model...")
+            model_to_resume, _ = load(MODEL_PATH)
+            model_to_resume = lora.apply_lora_to_model(model_to_resume, lora_config, layers_to_tune)
+            
+            model_to_resume = lora.load_adapter(model=model_to_resume, adapter_path=str(expected_checkpoint_path))
+
+            # 6. FINAL VERIFICATION
+            print("Step 6: Verifying that resumed model weights match trained weights...")
+            resumed_lora_params = get_lora_params(model_to_resume)
+            self.assertTrue(compare_params(trained_lora_params, resumed_lora_params),
+                            "Resumed model's weights must exactly match the saved trained weights.")
+            
+            print("\nCheckpoint save and resume workflow test PASSED!")
+
+if __name__ == '__main__':
+    unittest.main()
