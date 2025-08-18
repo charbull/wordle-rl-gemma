@@ -31,6 +31,7 @@ def play_wordle_game(
         print(f"--- Attempt {attempt_num + 1}/{max_trials} ---")
         
         messages = format_prompt_for_model(past_guesses, system_prompt)
+        print(f"💬 sent to model:\n{messages[-1]['content']}")
         prompt_string = tokenizer.apply_chat_template(
             messages, 
             tokenize=True, 
@@ -72,11 +73,10 @@ def play_wordle_game(
             continue # Move to the next attempt
         
         # If we reach here, the guess is valid
-        print(f"🤖 Model's valid guess: '{guess}'")
         feedback = get_feedback(guess, secret_word)
+        print(f"🤖 Model's valid guess: '{guess}', feedback: {feedback.feedback}\n")
         past_guesses.append(feedback)
         attempt_num += 1
-        print(f"💬 Feedback: {feedback.feedback}\n")
 
         if guess == secret_word.upper():
             print(f"🎉 SUCCESS! The model guessed the secret word {secret_word} correctly in {attempt_num} attempts ! 🎉")
