@@ -495,7 +495,7 @@ def train(config: cfg.TrainerConfig, system_prompt: str):
             print(f"\n--- Evaluation at Step {step_counter:04d} ---")
             print(f"Win Rate: {win_rate:.2f}% | Avg. Turns on Win: {eval_metrics['avg_turns_on_win']:.2f}")
             eval_steps.append(step_counter)
-            eval_win_rates.append(win_rate) # Changed from eval_rewards to be more specific
+            eval_win_rates.append(win_rate)
             writer.add_scalar('Evaluation/win_rate', win_rate, step_counter)
             writer.add_scalar('Evaluation/avg_turns_on_win', eval_metrics['avg_turns_on_win'], step_counter)
 
@@ -506,7 +506,7 @@ def train(config: cfg.TrainerConfig, system_prompt: str):
 
     pbar.close()
     print("\n--- Training Finished ---")
-    lora.save_checkpoint(policy_model, adapter_path.stem, "final", timestamp)
+    lora.save_checkpoint(model=policy_model, save_dir=str(adapter_path), checkpoint_file_name=adapter_path.stem, step="final", timestamp=timestamp)
     writer.close()
     plot_training_curves(
         timestamp, 
