@@ -93,7 +93,6 @@ if __name__ == "__main__":
     SECRET_WORD = "ROOTS"
 
     training_config = cfg.load_config_from_file(LORA_CONFIG_FILE_PATH)
-    training_config.rl.num_generations = 1  # For SxS, we generate one sequence at a time
     
     base_model, tokenizer = load(training_config.model.name)
     sampler = make_sampler(temp=training_config.rl.sampling_temperature)
