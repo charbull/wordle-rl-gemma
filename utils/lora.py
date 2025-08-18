@@ -10,6 +10,7 @@ import os
 from mlx.utils import tree_flatten
 from mlx.utils import tree_flatten, tree_unflatten
 import json
+from mlx_lm import load
 
 class LoRALinear(nn.Module):
     @staticmethod
@@ -229,3 +230,28 @@ def load_adapter(model: nn.Module, adapter_path: str):
     
     print("Adapter loading complete.")
     return model
+
+
+def load_adapter_with_model(training_config, adapter_path):
+    """Loads a LoRA adapter with the base model.
+
+    Args:
+        training_config (cfg.TrainerConfig): The training configuration containing model and LoRA settings.
+        adapter_path (str): The path to the LoRA adapter directory.
+
+    Returns:
+        nn.Module: The base model with the LoRA adapter applied and loaded.
+    """
+    print(f"Loading base model: {training_config.model.name}")
+    print(f"Loading LoRA adapter from: {adapter_path}")
+    
+    base_model_name = training_config.model.name
+    lora_config = training_config.lora
+    layers_to_tune = lora_config.layers_to_tune
+
+    base_model, _ = load(base_model_name)
+    config = {"rank": lora_config.rank, "alpha": lora_config.alpha, "dropout": lora_config.dropout}
+    lora_adapter_with_base_model = apply_lora_to_model(base_model, config, layers_to_tune)
+    lora_adapter_with_base_model = load_adapter(lora_adapter_with_base_model, adapter_path)
+
+    return lora_adapter_with_base_model
