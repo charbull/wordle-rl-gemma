@@ -17,7 +17,8 @@ class TrainingConfig:
     resume_from_checkpoint: str
     # path to save the adater to
     save_adapter_to: str
-    config_file: str  # Path to save the configuration file
+    # Path to save the configuration file
+    config_file: str  
 
 @dataclass
 class LoRAConfig:
@@ -59,7 +60,6 @@ class TrainerConfig:
     # Optional fields with a default value of None
     rl: Optional[RLConfig] = None
     grpo: Optional[GRPOConfig] = None
-    # TODO remove reward from config since it will be set separately in the training method
     reward: Optional[Dict[str, float]] = None
 
     @classmethod

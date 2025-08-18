@@ -218,8 +218,6 @@ def format_prompt_for_model(past_feedback: List[GuessFeedback], system_prompt: s
         user_content = "This is the first turn. Please provide your best starting word."
         return [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_content}]
 
-    # --- State-building logic (remains the same) ---
-    # ... (all the state building logic is correct and stays here) ...
     known_green = {}
     known_yellow = Counter()
     known_gray = set()
@@ -247,10 +245,7 @@ def format_prompt_for_model(past_feedback: List[GuessFeedback], system_prompt: s
             del known_yellow[letter]
         if letter in known_gray:
             known_gray.remove(letter)
-    # --- End of state-building logic ---
 
-
-    # --- Format the state into a clean prompt ---
     prompt_parts = ["You are playing a game of Wordle. Analyze the clues and provide your next guess.",
                     "**Current Knowledge:**"]
     
@@ -274,10 +269,8 @@ def format_prompt_for_model(past_feedback: List[GuessFeedback], system_prompt: s
     past_guesses = [fb.guess for fb in past_feedback]
     prompt_parts.append(f"*   **Words Already Guessed:** {', '.join(past_guesses)}")
     
-    # --- REFINED INSTRUCTION ---
     prompt_parts.append("\nYour task is to find a valid 5-letter English word that fits all the clues above.")
     prompt_parts.append("Provide your reasoning within <think> tags, and then your final guess within <guess> tags.")
-    # -------------------------
     
     user_content = "\n".join(prompt_parts)
     return [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_content}]
@@ -355,36 +348,36 @@ def calculate_total_reward(
         config: The TrainerConfig containing reward parameters.
         allowed_words: Set of valid 5-letter words for guesses.
         tokenizer: The tokenizer to calculate length penalties.
+        print_debug: If True, prints detailed debug information about the reward calculation.
     Returns:
         A tuple of (game_score, training_reward). The game_score is based solely on the guess quality, 
             the training_reward includes time and length penalties for the loss function.
     """
     reward_config = config.reward
     guess = parse_guess(response)
-
-    # --- Behavioral Penalties ---
-    time_penalty = -reward_config.get("time_penalty_per_guess", 1.0)
+    # we want the model to win in the fewest guesses possible
+    time_penalty = -reward_config.get("time_penalty_per_guess")
+    # we want the model to be concise in the reasoning
     length_penalty = 0.0
     if tokenizer and response:
-        length_penalty = -(len(tokenizer.encode(response)) * reward_config.get("length_penalty_per_token", 0.01))
+        length_penalty = -(len(tokenizer.encode(response)) * reward_config.get("length_penalty_per_token"))
 
-    # --- PRIORITY 1 & 2: Handle Game Rule Violations (immediate return) ---
+    # Handle Game Rule Violations
     if not guess:
-        game_score = -reward_config.get("format_fail_penalty", 120.0)
+        game_score = -reward_config.get("format_fail_penalty")
         return game_score, game_score + time_penalty + length_penalty
 
     if guess == secret_word.upper():
-        game_score = reward_config.get("solution_correct_guess", 150.0)
+        game_score = reward_config.get("solution_correct_guess")
         return game_score, game_score + time_penalty + length_penalty
         
     if any(fb.guess == guess for fb in past_feedback):
-        game_score = -reward_config.get("repetition_penalty", 30.0)
+        game_score = -reward_config.get("repetition_penalty")
         return game_score, game_score + time_penalty + length_penalty
 
-    # --- PRIORITY 3: Strategic Score Calculation ---
-    # 1. Build a correct, consistent clue state from history.
+    # Build a correct, consistent clue state from history.
     known_green = {}  # {index: letter}
-    # Use a Counter for yellow letters to handle duplicates correctly.
+    # Use a Counter for yellow letters to handle duplicates
     known_yellow = Counter()
     known_gray = set()
 
@@ -392,11 +385,10 @@ def calculate_total_reward(
         guess_letters = list(fb.guess)
         feedback_chars = fb.feedback.split()
         
-        # This counter tracks letters that are green or yellow IN THIS SPECIFIC GUESS.
-        # This is crucial for correctly identifying which 'X' letters are truly gray.
+        # This counter tracks letters that are green or yellow in this specific turn
         counts_in_secret_this_turn = Counter()
 
-        # First pass: Identify all Green and Yellow letters in this turn to establish counts
+        # Identify all Green and Yellow letters
         for i in range(5):
             letter = guess_letters[i]
             if feedback_chars[i] in ('G', 'Y'):
@@ -406,7 +398,7 @@ def calculate_total_reward(
         for letter, count in counts_in_secret_this_turn.items():
             known_yellow[letter] = max(known_yellow[letter], count)
 
-        # Second pass: Process all clues to update the global state
+        # Process all clues to update the global state
         for i in range(5):
             letter = guess_letters[i]
             feedback = feedback_chars[i]
@@ -419,7 +411,6 @@ def calculate_total_reward(
                 if counts_in_secret_this_turn[letter] == 0:
                     known_gray.add(letter)
 
-    # 2. Crucial Cleanup Step: Finalize the clue state.
     # A letter that is confirmed Green is the highest truth. It cannot also be
     # considered a yellow or gray constraint.
     green_letters = set(known_green.values())
@@ -429,7 +420,7 @@ def calculate_total_reward(
         if letter in known_gray:
             known_gray.remove(letter) # Cannot be gray if it's green
 
-    # 3. Calculate violations based on the clean, final clue state.
+    # Calculate violations based on the clean, final clue state.
     green_violations = 0
     for idx, correct_letter in known_green.items():
         if guess[idx] != correct_letter:
@@ -450,9 +441,9 @@ def calculate_total_reward(
 
     # 4. Calculate total penalty from violations.
     total_penalty = 0.0
-    total_penalty += green_violations * reward_config.get("green_position_penalty", 20.0)
-    total_penalty += yellow_violations * reward_config.get("yellow_letter_penalty", 15.0)
-    total_penalty += gray_violations * reward_config.get("gray_letter_penalty", 15.0)
+    total_penalty += green_violations * reward_config.get("green_position_penalty")
+    total_penalty += yellow_violations * reward_config.get("yellow_letter_penalty")
+    total_penalty += gray_violations * reward_config.get("gray_letter_penalty")
 
     # 5. Add soft penalty for out-of-dictionary words.
     if not is_valid_guess(guess, allowed_words):
@@ -462,7 +453,7 @@ def calculate_total_reward(
     stagnation_penalty = calculate_stagnation_penalty(guess, known_green, known_yellow, config)
     total_penalty += stagnation_penalty
     strategic_bonus = get_strategic_bonus(guess, past_feedback, config)
-    potential_score = reward_config.get("valid_guess_base", 10.0) + strategic_bonus
+    potential_score = reward_config.get("valid_guess_base") + strategic_bonus
     
     # 7. Calculate final scores.
     game_score = potential_score - total_penalty
@@ -500,6 +491,7 @@ def play_wordle_game(
         config: Configuration parameters for the RL training and game settings.
         sampler: The sampling strategy to use for generation (e.g., temperature, top-k).
         initial_history: Optional initial history of past guesses and feedback to continue from.
+        print_debug: If True, prints detailed debug information during the game.
 
     Returns:
         A GameRollout object containing the full history of attempts and whether the game was solved.
@@ -522,7 +514,7 @@ def play_wordle_game(
         if any(fb.guess == secret_word.upper() for fb in past_feedback):
              return game_rollout
 
-    # Main game loop start from initial history length to max trials
+    # Game starts here
     for attempt_num in range(len(past_feedback), max_trials):
         if print_debug:
             print(f"\n--- Turn {attempt_num + 1}/{max_trials} ---")
@@ -534,6 +526,7 @@ def play_wordle_game(
         prompt_tokens = tokenizer.encode(prompt_string)
 
         # Generate N parallel responses from the current state of the model.
+        # TODO: Consider batching these generations when MLX supports it.
         generations = [
             generate(
                 model, tokenizer, prompt=prompt_string,
@@ -570,8 +563,7 @@ def play_wordle_game(
             )
             current_turn_attempts.append(attempt)
             
-        # Filter for only valid, new, parsable attempts to advance the game state.
-        # and from the dictionary
+        # Filter for only valid, attempts to advance the game state.
         valid_candidates = [
             att for att in current_turn_attempts
             if att.parsed_guess and \
@@ -587,7 +579,7 @@ def play_wordle_game(
             game_rollout.attempts.extend(current_turn_attempts)
             break
 
-        # Select the best candidate from the VALID ones to advance the game state
+        # Select the best candidate from the valid ones to advance the game state
         best_attempt = max(valid_candidates, key=lambda att: att.game_score)
         best_guess = best_attempt.parsed_guess
 
@@ -609,9 +601,9 @@ def play_wordle_game(
 
         # Store the results
         best_attempt.feedback_given = feedback
-        # Add ALL attempts (including failed ones) to the rollout for the trainer.
+        # Add all attempts (including failed ones) to the rollout for the trainer.
         game_rollout.attempts.extend(current_turn_attempts)
-        # Add only the feedback from the BEST VALID path to guide the next turn.
+        # Add only the feedback from the best valid path to guide the next turn.
         past_feedback.append(feedback)
 
         # 6. Check for game termination
@@ -642,7 +634,6 @@ def play_wordle_game(
                 if not attempts_for_turn:
                     continue
 
-                # --- FIX: Find the winner that was actually chosen ---
                 # The real winner is the one for which we generated feedback to advance the game.
                 winner = next((att for att in attempts_for_turn if att.feedback_given is not None), None)
 

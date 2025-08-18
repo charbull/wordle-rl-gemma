@@ -1,6 +1,3 @@
-# ==============================================================================
-# ---  LoRA Code (Copied directly from mlx-examples) ---
-# ==============================================================================
 # We define the LoRALinear class here to avoid importing it from mlx-examples,
 # making the script fully self-contained.
 from typing import Any
@@ -50,8 +47,7 @@ class LoRALinear(nn.Module):
                 weight, linear.scales, linear.biases, linear.group_size, linear.bits
             )
 
-        # The LoRA update is W' = W + scale * (A @ B).T
-        # which is equivalent to W' = W + scale * (B.T @ A.T)
+        # The LoRA update is W' = W + scale * (B.T @ A.T)
         lora_a_t = self.lora_a.T
         lora_b_t = self.lora_b.T
 
@@ -83,7 +79,6 @@ class LoRALinear(nn.Module):
         super().__init__()
         self.linear = nn.Linear(input_dims, output_dims, bias=bias)
         self.lora_rank = lora_rank
-        # The scaling factor is a key parameter in LoRA.
         # use rsLoRA scaling factor: scale = alpha / rank
         self.scale = lora_alpha / math.sqrt(lora_rank)
         # Dropout layer for regularization
@@ -114,7 +109,7 @@ def save_adapter(model: nn.Module, output_dir: str, lora_config: cfg.LoRAConfig,
     Args:
         model (nn.Module): The model with LoRA layers.
         output_dir (str): The directory to save the adapter files to.
-        lora_config (dict): The dictionary containing LoRA parameters (rank, alpha, etc.).
+        lora_config (dict): The dictionary containing LoRA parameters (rank, alpha, etc.). this is for the json.
         model_name (str): The name of the base model used for training.
     """
     Path(output_dir).mkdir(parents=True, exist_ok=True)
@@ -141,13 +136,22 @@ def save_adapter(model: nn.Module, output_dir: str, lora_config: cfg.LoRAConfig,
     print(f"✅ Adapter successfully saved to {output_dir}")
 
 def apply_lora_to_model(model: nn.Module, lora_config: dict[str, Any], layers_to_tune: int)-> nn.Module:
-    """ Applies LoRA structure to the model's layers."""
+    """ Applies LoRA structure to the model's layers.
+    Note: the gemman models have different layer access patterns.
+    Its important to print the model architecture to confirm the correct layers are being modified.
+    Args:
+        model (nn.Module): The base model to apply LoRA to.
+        lora_config (dict): A dictionary containing LoRA parameters: rank, alpha, dropout.
+        layers_to_tune (int): Number of layers to apply LoRA to.
+    Returns:
+        nn.Module: The model with LoRA layers applied.
+    
+    """
     # Freeze the model before applying LoRA
     model.freeze()
     # print(model.language_model.model)
     layers = model.language_model.model.layers # gemma 4b
-    # layers = model.model.layers # gemma 1b
-    # min_layers_to_tune = min(layers_to_tune, len(model.model.layers)) # gemma 1b
+    # layers = model.model.layers # this is for gemma 1b
     min_layers_to_tune = min(layers_to_tune, len(layers)) # gemma 4b
     if min_layers_to_tune < layers_to_tune:
         print(f"Warning: Trying to tune {layers_to_tune} layers, but model only has {len(model.model.layers)}. Tuning {min_layers_to_tune} layers instead.")
@@ -156,8 +160,6 @@ def apply_lora_to_model(model: nn.Module, lora_config: dict[str, Any], layers_to
         l.self_attn.k_proj = LoRALinear.from_linear(l.self_attn.k_proj, **lora_config)
         l.self_attn.v_proj = LoRALinear.from_linear(l.self_attn.v_proj, **lora_config)
         l.self_attn.o_proj = LoRALinear.from_linear(l.self_attn.o_proj, **lora_config)
-
-
 
     trainable_params = sum(v.size for _, v in tree_flatten(model.trainable_parameters()))
     total_params = sum(v.size for _, v in tree_flatten(model.parameters()))
@@ -207,8 +209,7 @@ def save_checkpoint(model: nn.Module, save_dir: str, checkpoint_file_name: str, 
 
 def load_adapter(model: nn.Module, adapter_path: str):
     """
-    Manually loads LoRA adapter weights into a model.
-    This is a workaround for older mlx-lm versions that lack model.load_adapter().
+    Loads LoRA adapter weights into a model.
     """
     print(f"Loading adapter weights from: {adapter_path}")
     try:

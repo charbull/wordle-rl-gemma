@@ -21,15 +21,10 @@ def load_word_list_from_url(url: str, output_path: str) -> Set[str]:
             if words:
                 return words
                 
-        # Step 1: Make an HTTP GET request to the URL
         response = requests.get(url)
 
-        # Step 2: Check if the request was successful (status code 200)
-        # This will raise an exception for bad status codes (4xx or 5xx)
         response.raise_for_status()
 
-        # Step 3: Process the response text
-        # The response text is a single string, so we split it into lines
         words = {
             line.strip().upper()
             for line in response.text.splitlines()
