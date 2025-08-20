@@ -11,6 +11,12 @@ class ModelConfig:
 class TrainingConfig:
     iterations: int
     learning_rate: float
+    # Set to True to enable the scheduler
+    use_lr_scheduler: bool   
+    # The learning rate at the very end of training
+    lr_min: float
+    # Should match total `iterations`
+    lr_decay_steps: int  
     batch_size: int
     log_steps: int
     checkpoint_steps: int
@@ -19,6 +25,8 @@ class TrainingConfig:
     save_adapter_to: str
     # Path to save the configuration file
     config_file: str  
+    # data path for training and evaluation
+    data_path: str
 
 @dataclass
 class LoRAConfig:

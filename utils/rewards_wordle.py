@@ -12,12 +12,12 @@ import json
 import config as cfg
 from collections import Counter
 import re
-import ast
 from typing import List
 from mlx_lm import generate
 from dataclasses import dataclass, field
 from utils import read_files
 from utils import config as cfg
+from collections import Counter
 # ==============================================================================
 # ---  DATA STRUCTURES FOR GAME LOGIC ---
 # ==============================================================================
@@ -58,7 +58,7 @@ class GameRollout:
     secret_word: str = ""
     solved: bool = False
 
-from collections import Counter # Make sure this is at the top of your file
+
 def get_feedback(guess: str, secret_word: str) -> GuessFeedback:
     """
     Given a guess and the secret word, returns the feedback string in the format:
@@ -154,27 +154,12 @@ def get_strategic_bonus(guess: str, past_feedback: List[GuessFeedback], config: 
             
         return reward_for_mid_game_exploration(guess, known_letters, config)
 
-# We also need to slightly adjust reward_for_information_gain to not check the turn number
 def reward_for_information_gain(guess: str, config: cfg.TrainerConfig) -> float:
     """Provides a reward based on pre-calculated information gain (entropy)."""
     if not guess:
         return 0.0
     entropy_score = WORD_ENTROPY_SCORES.get(guess.upper(), 0.0)
     return entropy_score * config.reward.get("information_gain_bonus_coeff")
-
-
-def format_prompt_from_dataset(sample):
-    history_str = sample['past_guess_history']
-    try:
-        history_list = ast.literal_eval(history_str)
-    except (ValueError, SyntaxError):
-        history_list = []
-    if not history_list:
-        return "This is the first turn. Please provide your best starting word."
-    prompt_parts = ["**Clues so far:**"]
-    for i, (guess, feedback) in enumerate(history_list):
-        prompt_parts.append(f"* Guess {i+1}: {guess} → {feedback}")
-    return "\n".join(prompt_parts)
 
 def parse_guess(response: str) -> str:
     """
@@ -276,29 +261,30 @@ def format_prompt_for_model(past_feedback: List[GuessFeedback], system_prompt: s
     return [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_content}]
 
 
-def _reconstruct_past_feedback(messages: list, secret_word: str) -> List[GuessFeedback]:
+def parse_history_from_prompt(user_prompt: str, secret_word: str) -> List[GuessFeedback]:
     """
-    Parses a 'messages' list from a dataset trajectory and reconstructs the
-    internal List[GuessFeedback] format by re-calculating feedback for each
-    past guess against the secret word.
-
-    Args:
-        messages: The list of message dictionaries from the dataset.
-        secret_word: The secret word for the current puzzle.
-
-    Returns:
-        A list of GuessFeedback objects representing the game's history.
+    Parses a 'Current Knowledge' prompt to reconstruct the game's past feedback.
     """
+    # Regex to find the "Words Already Guessed" line and capture the words
+    match = re.search(r"\*   \*\*Words Already Guessed:\*\* (.+)", user_prompt)
+    if not match:
+        return []
+
+    guessed_words_str = match.group(1)
+    if guessed_words_str.lower() == 'none':
+        return []
+
+    # Split the string of words and strip whitespace
+    guessed_words = [word.strip() for word in guessed_words_str.split(',')]
+
+    # Re-calculate the feedback for each past guess to create the history
     past_feedback = []
-    # Find all past guesses from 'assistant' messages in the history
-    for msg in messages:
-        if msg.get("role") == "assistant":
-            # Use your existing robust parser to find the guess
-            guess = parse_guess(msg.get("content", ""))
-            if guess:
-                # Re-calculate the feedback to ensure it's in the correct format.
-                feedback = get_feedback(guess, secret_word)
-                past_feedback.append(feedback)
+    for guess in guessed_words:
+        if guess: # Ensure we don't process empty strings
+            # Use the existing get_feedback function from this file
+            feedback_obj = get_feedback(guess, secret_word)
+            past_feedback.append(feedback_obj)
+    
     return past_feedback
 
 
@@ -476,7 +462,7 @@ def play_wordle_game(
     system_prompt: str,
     config: cfg.TrainerConfig,
     sampler,
-    initial_history: list = None,
+    initial_history: str,
     print_debug = False
 ) -> GameRollout:
     """
@@ -501,18 +487,15 @@ def play_wordle_game(
     already_guessed_words = set()
     max_trials = config.rl.max_trials
     num_generations = config.rl.num_generations
+
+    # This is provided by the dataset for continuing games.
+    past_feedback = parse_history_from_prompt(initial_history, secret_word)
+    already_guessed_words = {fb.guess for fb in past_feedback}
+
     if print_debug:
         print(f"\n{'='*35}\n|| NEW GAME || Secret Word: {secret_word.upper()}\n{'='*35}")
-    
-    # This is provided by the dataset for continuing games.
-    if initial_history:
-        past_feedback = _reconstruct_past_feedback(initial_history, secret_word)
-        for fb in past_feedback:
-            # Only add valid past guesses to the already_guessed_words set
-            if fb.guess not in ["INVALID_FORMAT", "REPEATED_GUESS", "WORD_NOT_IN_LIST"]:
-                 already_guessed_words.add(fb.guess)
-        if any(fb.guess == secret_word.upper() for fb in past_feedback):
-             return game_rollout
+        if past_feedback:
+            print(f"--- Starting from a history of {len(past_feedback)} turn(s) ---")
 
     # Game starts here
     for attempt_num in range(len(past_feedback), max_trials):
@@ -588,7 +571,7 @@ def play_wordle_game(
         feedback = get_feedback(best_guess, secret_word)
         feedback.is_in_dictionary = is_valid_in_dict
 
-        print(f"DEBUG : PLAY_WORDLE: For guess '{best_guess}' against secret '{secret_word}'," 
+        print(f"\nwordle play: guess '{best_guess}' against secret '{secret_word}'," 
               f" generated feedback is '{feedback.feedback}'")
         
         if print_debug:

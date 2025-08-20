@@ -1,5 +1,5 @@
 """Reinforcement Learning Trainer"""
-from typing import List, Any, Dict
+from typing import List
 import itertools
 import gc
 from collections import defaultdict, deque
@@ -17,10 +17,12 @@ from pathlib import Path
 from datetime import datetime
 from utils import config as cfg
 from utils import lora
-from utils.rewards_wordle import play_wordle_game, parse_guess
+from utils.rewards_wordle import play_wordle_game, parse_guess, GameRollout
 from tensorboardX import SummaryWriter
 from functools import partial
-
+from dataclasses import dataclass, asdict
+import numpy as np
+import math
 # ==============================================================================
 # ---  HELPER FUNCTIONS ---
 # ==============================================================================
@@ -82,9 +84,110 @@ def pad_sequences(token_lists: List[List[int]], pad_value: int) -> mx.array:
 def is_nan_or_inf(x):
     return mx.isnan(x).any().item() or mx.isinf(x).any().item()
 
+# ========================
+# --- LOGGING FUNCTIONS ---
+# ========================
+@dataclass
+class GameRecord:
+    """A structured object to hold the results of a single game."""
+    log_type: str
+    step: int
+    secret_word: str
+    solved: bool
+    turns_to_solve: int
+    final_reward: float
+    loss_at_step: float
+
+def log_game_result(step: int, loss: float, game_rollout: GameRollout, log_type: str) -> GameRecord:
+    """
+    Analyzes a completed solved game and returns a structured GameRecord object.
+    Args:
+        step: Current training step.
+        loss: Loss value at the current step.
+        game_rollout: The completed GameRollout object containing game details.
+        log_type: A string indicating the type of log (e.g., "train", "eval").
+    Returns:
+        A GameRecord dataclass instance summarizing the game outcome.
+    """
+    if game_rollout.solved:
+        winning_attempt = game_rollout.attempts[-1]
+        final_score = winning_attempt.training_reward
+        num_turns = len(set(att.prompt_string for att in game_rollout.attempts))
+    else:
+        final_score = -1.0 
+        num_turns = -1
+
+    return GameRecord(
+        log_type=log_type,
+        step=step,
+        solved=game_rollout.solved,
+        secret_word=game_rollout.secret_word,
+        turns_to_solve=num_turns,
+        final_reward=final_score,
+        loss_at_step=loss
+    )
+
+def write_metrics_to_file(records: List[GameRecord], output_file: Path):
+    """
+    Appends a list of record dictionaries to a .jsonl file.
+    Creates the necessary parent directory if it does not exist.
+
+    Args:
+        records: A list of dictionaries, where each dict is a game result.
+        output_file: The Path object for the output file.
+    """
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_file, 'a') as f:
+        for record in records:
+            json_record = json.dumps(asdict(record))
+            f.write(json_record + '\n')
+
+def log_metrics_to_tensorboard(writer: SummaryWriter, records: List[GameRecord], global_step: int, log_type: str):
+    """
+    Calculates summary statistics from a list of GameRecords and logs them to TensorBoard.
+    """
+    if not records:
+        return
+
+    total_games = len(records)
+    wins = sum(1 for r in records if r.solved) # Changed to r.solved
+    win_rate = (wins / total_games) * 100.0 if total_games > 0 else 0.0
+    
+    winning_turns = [r.turns_to_solve for r in records if r.solved] # Changed to r.turns_to_solve
+    avg_turns_on_win = np.mean(winning_turns) if winning_turns else 0.0
+    avg_final_reward = np.mean([r.final_reward for r in records if r.solved]) # Changed to r.final_reward
+
+    writer.add_scalar(f"Performance/{log_type}_win_rate_percent", win_rate, global_step)
+    if winning_turns:
+        writer.add_scalar(f"Performance/{log_type}_avg_turns_on_win", avg_turns_on_win, global_step)
+        writer.add_scalar(f"Performance/{log_type}_avg_win_reward", avg_final_reward, global_step)
+        writer.add_histogram(f"Distributions/{log_type}_turns_to_solve", np.array(winning_turns), global_step)
+
+    text_summary = f"### {log_type.capitalize()} Summary @ Step {global_step}\n| Metric | Value |\n|---|---|\n"
+    text_summary += f"| Win Rate | {win_rate:.2f}% ({wins}/{total_games}) |\n| Avg. Turns on Win | {avg_turns_on_win:.2f} |\n"
+    text_summary += "\n**Recent Wins:**\n| Secret Word | Turns |\n|---|---|\n"
+    recent_wins = [r for r in records if r.solved][-5:]
+    for win in recent_wins:
+        text_summary += f"| {win.secret_word} | {win.turns_to_solve} |\n"
+    writer.add_text(f"Summaries/{log_type}_game_summary", text_summary, global_step)
+
+
 # ==============================================================================
 # ---  LOSS FUNCTION ---
 # ==============================================================================
+def cosine_decay_lr(step: int, initial_lr: float, min_lr: float, decay_steps: int) -> float:
+    """
+    Calculates the learning rate at a given step using a cosine decay schedule.
+    """
+    if step >= decay_steps:
+        return min_lr
+    
+    # Cosine annealing formula
+    decay_ratio = step / decay_steps
+    coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))
+    
+    return min_lr + coeff * (initial_lr - min_lr)
+
 def get_log_probs(model: nn.Module, input_ids: mx.array, output_ids: mx.array, pad_token_id: int) -> mx.array:
     full_sequence = mx.concatenate([input_ids, output_ids], axis=1)
     logits = model(full_sequence)
@@ -188,24 +291,22 @@ def evaluate(
     tokenizer,
     dataset,
     config: cfg.TrainerConfig,
-    system_prompt: str
-) -> Dict[str, Any]:
+    system_prompt: str,
+    current_step: int
+) -> List[GameRecord]:
     """
-    Evaluates the model by playing full games of Wordle and tracking win rate.
+    Evaluates the model and returns a list of detailed GameRecord objects.
     """
     # go into eval mode
     model.eval()
-    wins = 0
-    total_turns_for_wins = 0
-    num_samples_processed = 0
-    turn_distribution_on_win = defaultdict(int)
+    eval_game_outcomes: List[GameRecord] = []
     # make a sampler with temperature 0 for deterministic evaluation
     eval_sampler = make_sampler(temp=0.0)
     num_to_select = min(config.evaluation.samples, len(dataset))
     if num_to_select == 0:
         print("Warning: Evaluation dataset is empty. Skipping evaluation.")
         model.train()
-        return {'win_rate': 0.0, 'avg_turns_on_win': 0.0, 'turn_distribution_on_win': {}}
+        return []
     eval_subset = dataset.shuffle(seed=42).select(range(num_to_select))
     for sample in tqdm(eval_subset, desc="Evaluating"):
         secret_word = sample['secret']
@@ -216,24 +317,14 @@ def evaluate(
             system_prompt=system_prompt,
             config=config,
             sampler=eval_sampler,
+            initial_history=sample['messages'][1]['content'],
             print_debug=True
         )
-        num_samples_processed += 1
-        if game_result.solved:
-            wins += 1
-            num_turns = len(set(att.prompt_string for att in game_result.attempts))
-            total_turns_for_wins += num_turns
-            turn_distribution_on_win[num_turns] += 1
-    # back to train mode
-    model.train()
-    win_rate = (wins / num_samples_processed) if num_samples_processed > 0 else 0.0
-    avg_turns_on_win = (total_turns_for_wins / wins) if wins > 0 else 0.0
-    return {
-        'win_rate': win_rate,
-        'avg_turns_on_win': avg_turns_on_win,
-        'turn_distribution_on_win': dict(sorted(turn_distribution_on_win.items()))
-    }
+        eval_record = log_game_result(current_step, -1.0, game_result, 'eval')
+        eval_game_outcomes.append(eval_record)
 
+    model.train()
+    return eval_game_outcomes
 # ==============================================================================
 # --- DATA LOADING ---
 # ==============================================================================
@@ -302,15 +393,19 @@ def train(config: cfg.TrainerConfig, system_prompt: str):
     print(f"Loading base model: {config.model.name}")
     print(f"Resume from checkpoint: {config.training.resume_from_checkpoint}")
 
-    dataset_path = "./data/sft_wordle_cot_data.jsonl"
+    dataset_path = config.training.data_path
+    if not Path(dataset_path).exists():
+        raise FileNotFoundError(f"Dataset file not found at '{dataset_path}'")
+    print(f"Loading dataset from: {dataset_path}")
     adapter_path = Path(config.training.save_adapter_to)
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     log_dir = f"runs/rl_wordle_{timestamp}"
     writer = SummaryWriter(log_dir)
     print(f"TensorBoard logs will be saved to: {log_dir}")
     win_tracker = deque(maxlen=config.training.iterations)
+    metrics_file_path = Path(f"logs/rl_wordle_metrics_{timestamp}.jsonl")
 
-    # In GRPO, the 'reference model' is a frozen copy of the original SFT model.
+    # In GRPO, the 'reference model' is a frozen copy of the original model.
     # It does NOT get updated during training.
     # TODO: consider updating the reference model periodically every x steps.
     print("Creating policy and reference models...")
@@ -361,11 +456,12 @@ def train(config: cfg.TrainerConfig, system_prompt: str):
     # Now, use the fully cleaned dataset for training
     shuffled_dataset = playable_dataset.shuffle(seed=42)
     
-    train_percentage = 0.95
+    train_percentage = 0.85 # Use a 85/15 split
+
     num_train_samples = int(len(shuffled_dataset) * train_percentage)
     train_dataset = shuffled_dataset.select(range(num_train_samples))
     test_dataset = shuffled_dataset.select(range(num_train_samples, len(shuffled_dataset)))
-
+    print(f"Dataset split: {len(train_dataset)} training samples, {len(test_dataset)} evaluation samples.")
     # This fn will be called with JAX-style value_and_grad and will 
     # return both loss and grads, Tuple[mx.array, Dict].
     # This is a dictionary containing the gradients of the loss with respect
@@ -374,6 +470,7 @@ def train(config: cfg.TrainerConfig, system_prompt: str):
     loss_and_grad_fn = mx.value_and_grad(grpo_loss_and_grad, argnums=0)
     train_steps, train_losses, train_avg_rewards = [], [], []
     eval_steps, eval_win_rates = [], []
+    training_game_outcomes: List[GameRecord] = []
 
     print("\nStarting GRPO training...")
     step_counter = 0
@@ -385,7 +482,7 @@ def train(config: cfg.TrainerConfig, system_prompt: str):
         sample = next(data_iterator)
         game_rollout = play_wordle_game(
             model=policy_model, tokenizer=tokenizer, secret_word=sample['secret'],
-            system_prompt=system_prompt, config=config, sampler=sampler, initial_history=sample['messages'],
+            system_prompt=system_prompt, config=config, sampler=sampler, initial_history=sample['messages'][1]['content'],
             print_debug=(step_counter % config.training.log_steps == 0)
         )
         
@@ -455,6 +552,20 @@ def train(config: cfg.TrainerConfig, system_prompt: str):
         
         # After processing all prompts in this step, average gradients and apply update when we have valid micro-batches 
         if num_micro_batches > 0:
+
+            ## LR Decay
+            if config.training.use_lr_scheduler:
+                # Calculate the new learning rate for the current step
+                new_lr = cosine_decay_lr(
+                                step=step_counter,
+                                initial_lr=config.training.learning_rate,
+                                min_lr=config.training.lr_min,
+                                decay_steps=config.training.lr_decay_steps
+                            )
+                # Apply the new learning rate to the optimizer
+                optimizer.learning_rate = new_lr
+        
+            # Average the accumulated gradients and loss
             avg_grads = {k: v / num_micro_batches for k, v in accumulated_grads.items()}
             avg_loss = total_loss / num_micro_batches
 
@@ -469,6 +580,8 @@ def train(config: cfg.TrainerConfig, system_prompt: str):
         else:
             avg_loss = -1.0
 
+        train_record = log_game_result(step_counter, avg_loss, game_rollout, 'train')
+        training_game_outcomes.append(train_record)
         gc.collect()
 
         step_counter += 1
@@ -479,31 +592,56 @@ def train(config: cfg.TrainerConfig, system_prompt: str):
             "win%": f"{rolling_win_rate:.1f}\n"
         })
 
-        # Logging
-        if step_counter > 0 and step_counter % config.training.log_steps == 0:
-            print(f"\nStep {step_counter:04d} | Avg Train Loss: {avg_loss:.4f} | Avg Train Reward: {avg_reward_this_step:.4f}\n")
-            train_steps.append(step_counter)
-            train_losses.append(avg_loss)
-            train_avg_rewards.append(avg_reward_this_step)
-            writer.add_scalar('Loss/train', avg_loss, step_counter)
-            writer.add_scalar('Reward/train_avg', avg_reward_this_step, step_counter)
-
-        # Evaluation
         if step_counter > 0 and step_counter % config.evaluation.steps == 0:
-            eval_metrics = evaluate(policy_model, tokenizer, test_dataset, config, system_prompt)
-            win_rate = eval_metrics['win_rate'] * 100
-            print(f"\n--- Evaluation at Step {step_counter:04d} ---")
-            print(f"Win Rate: {win_rate:.2f}% | Avg. Turns on Win: {eval_metrics['avg_turns_on_win']:.2f}")
-            eval_steps.append(step_counter)
-            eval_win_rates.append(win_rate)
-            writer.add_scalar('Evaluation/win_rate', win_rate, step_counter)
-            writer.add_scalar('Evaluation/avg_turns_on_win', eval_metrics['avg_turns_on_win'], step_counter)
+            # We average the metrics from all training games played since the last evaluation.
+            # This creates a much smoother and more meaningful trendline.
+           
+            # Calculate and store metrics for the plot form training
+            if training_game_outcomes:
+                interval_losses = [r.loss_at_step for r in training_game_outcomes if r.loss_at_step != -1.0]
+                avg_interval_loss = np.mean(interval_losses) if interval_losses else -1.0
+                
+                interval_win_rewards = [r.final_reward for r in training_game_outcomes if r.solved]
+                avg_interval_reward = np.mean(interval_win_rewards) if interval_win_rewards else 0.0
+                
+                train_steps.append(step_counter)
+                train_losses.append(avg_interval_loss)
+                train_avg_rewards.append(avg_interval_reward)
+
+            # Log training data to Tensorboard and files
+            print(f"\n--- Logging metrics for training steps up to {step_counter} ---")
+            log_metrics_to_tensorboard(writer, training_game_outcomes, step_counter, 'train')
+            write_metrics_to_file(training_game_outcomes, metrics_file_path)
+            training_game_outcomes.clear()
+
+            # Evaluate the model on the test dataset
+            eval_game_outcomes = evaluate(
+                policy_model, tokenizer, test_dataset, config, system_prompt, step_counter)
+            if eval_game_outcomes:
+                eval_wins = sum(1 for r in eval_game_outcomes if r.solved)
+                eval_total = len(eval_game_outcomes)
+                win_rate = (eval_wins / eval_total) * 100 if eval_total > 0 else 0.0
+                
+                win_turns = [r.turns_to_solve for r in eval_game_outcomes if r.solved]
+                avg_turns_on_win = np.mean(win_turns) if win_turns else 0.0
+
+                print(f"\n--- Evaluation at Step {step_counter:04d} ---")
+                print(f"Win Rate: {win_rate:.2f}% | Avg. Turns on Win: {avg_turns_on_win:.2f}")
+                
+                # Store the results for the final plot
+                eval_steps.append(step_counter)
+                eval_win_rates.append(win_rate)
+            log_metrics_to_tensorboard(writer, eval_game_outcomes, step_counter, 'eval')
+            write_metrics_to_file(eval_game_outcomes, metrics_file_path)
 
         # Checkpointing
         if step_counter > 0 and step_counter % config.training.checkpoint_steps == 0:
             lora.save_checkpoint(model=policy_model,  save_dir=str(adapter_path), checkpoint_file_name="grpo_lora_wordle", 
                                                    step=str(step_counter), timestamp=timestamp)
 
+    if training_game_outcomes:
+        print(f"\nWriting final {len(training_game_outcomes)} training metrics to file...")
+        write_metrics_to_file(training_game_outcomes, metrics_file_path)
     pbar.close()
     print("\n--- Training Finished ---")
     lora.save_checkpoint(model=policy_model, save_dir=str(adapter_path), checkpoint_file_name=adapter_path.stem, step="final", timestamp=timestamp)

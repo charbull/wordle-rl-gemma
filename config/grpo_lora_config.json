@@ -3,14 +3,18 @@
         "name": "mlx-community/gemma-3-4b-it-bf16"
     },
     "training": {
-        "iterations": 300,
+        "iterations": 500,
         "learning_rate": 1e-6,
+        "use_lr_scheduler": true,
+        "lr_min": 5e-6,
+        "lr_decay_steps": 500,
         "batch_size": 16,
-        "log_steps": 10,
+        "log_steps": 20,
         "checkpoint_steps": 50,
-        "resume_from_checkpoint": "./adapters/grpo_lora_wordle/grpo_lora_wordle_50_20250816-214404.npz",
+        "resume_from_checkpoint": "",
         "save_adapter_to": "./adapters/grpo_lora_wordle",
-        "config_file": "./config/grpo_lora_config.json"
+        "config_file": "./config/grpo_lora_config.json",
+        "data_path": "./data/wordle_cot_data_rl.jsonl"
     },
     "lora": {
         "rank": 16,
@@ -19,8 +23,8 @@
         "layers_to_tune": 33
     },
     "evaluation": {
-        "steps": 20,
-        "samples": 5
+        "steps": 30,
+        "samples": 25
     },
     "rl": {
         "num_generations": 2,
@@ -47,7 +51,7 @@
         
         "gray_letter_penalty": 15.0, 
         "yellow_letter_penalty": 15.0,
-        "green_position_penalty": 20.0,
+        "green_position_penalty": 25.0,
         "green_reuse_penalty": 0.5,
         "yellow_reuse_penalty": 0.2,
         
