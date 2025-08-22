@@ -12,7 +12,8 @@ import random
 import pandas as pd
 import matplotlib.pyplot as plt
 from pathlib import Path
-from tqdm import tqdm 
+from tqdm import tqdm
+from utils import constants
 
 def play_wordle_game(
     model,
@@ -150,8 +151,7 @@ if __name__ == "__main__":
     OUTPUT_DIR = Path(LORA_CONFIG_FILE_PATH).parent / "plots"
 
     # --- 1. Setup: Load words and models ---
-    word_list_url = "https://raw.githubusercontent.com/Roy-Orbison/wordle-guesses-answers/refs/heads/main/answers.txt"
-    all_possible_words = list(read_files.load_word_list_from_url(word_list_url, "./data/nyt_possible_wordle_list.txt"))
+    all_possible_words = list(constants.ALLOWED_GUESSES)
     
     random.seed(42)
     secret_words_sample = random.sample(all_possible_words, NUM_SAMPLES)

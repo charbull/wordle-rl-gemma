@@ -2,7 +2,7 @@
 # It can generate data for either Supervised Fine-Tuning (SFT) or Reinforcement Learning (RL) modes.
 # The generated data is saved in JSONL format.
 import argparse
-from utils import read_files
+from utils import constants
 from utils import prompt
 from synth.cot_wordle_data_generation import generate_cot_sft_data, generate_cot_rl_data
 
@@ -19,8 +19,7 @@ if __name__ == "__main__":
 
     NUM_SAMPLES_TO_GENERATE = 2300 # this is the number of answers of the NYT Wordle game
     OUTPUT_FILENAME = f"./data/wordle_cot_data_{args.mode}.jsonl" # Dynamic filename
-    file_url_possible_answers = "https://raw.githubusercontent.com/Roy-Orbison/wordle-guesses-answers/refs/heads/main/answers.txt"
-    SOLUTION_WORDS = list(read_files.load_word_list_from_url(file_url_possible_answers, "./data/nyt_answers_wordle_list.txt"))
+    SOLUTION_WORDS = constants.ANSWERS_WORDS
 
     if args.mode == 'sft':
         generate_cot_sft_data(

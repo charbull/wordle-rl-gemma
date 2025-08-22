@@ -6,8 +6,7 @@ from collections import Counter
 from tqdm import tqdm
 import time
 from typing import Set
-from utils.read_files import load_word_list_from_url
-
+from utils import constants
 # =====================================================================
 # VECTORIZED FEEDBACK & ENTROPY CALCULATION
 # =====================================================================
@@ -62,16 +61,8 @@ if __name__ == "__main__":
     start_time = time.time()
 
     # --- CONFIGURATION ---
-    # URLs for the official NYT Wordle word lists
-    POSSIBLE_GUESSES_URL = "https://gist.githubusercontent.com/kcwhite/bb598f1b3017b5477cb818c9b086a5d9/raw/5a0adbbb9830ed93a573cb87a7c14bb5dd0b1883/wordle_possibles.txt"
-    POSSIBLE_GUESSES_PATH = "./data/nyt_possible_wordle_list.txt"
-    
-    ANSWERS_URL = "https://raw.githubusercontent.com/Roy-Orbison/wordle-guesses-answers/refs/heads/main/answers.txt"
-    ANSWERS_PATH = "./data/nyt_answers_wordle_list.txt"
-    # Call the function with the URL
-   
-    solution_words = load_word_list_from_url(ANSWERS_URL, ANSWERS_PATH)
-    allowed_guesses = load_word_list_from_url(POSSIBLE_GUESSES_URL, POSSIBLE_GUESSES_PATH)
+    solution_words = constants.ANSWERS_WORDS
+    allowed_guesses = constants.ALLOWED_GUESSES
    
     # Print a few words to confirm it worked
     if solution_words:
