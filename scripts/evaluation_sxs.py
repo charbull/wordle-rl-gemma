@@ -62,7 +62,6 @@ def play_wordle_game(
             # Set the error message for the NEXT turn.
             last_error_message = "**Previous Attempt Error:** Your response did not include a guess inside <guess>...</guess> tags. You must provide a guess in the correct format."
             attempt_num += 1
-            print("-" * 50)
             continue
 
         guess = re.sub(r'[^A-Z]', '', match.group(1).upper())
@@ -73,7 +72,6 @@ def play_wordle_game(
             # Set the error message for the NEXT turn.
             last_error_message = f"**Previous Attempt Error:** Your guess '{guess}' was not 5 letters long. You must guess a 5-letter word."
             attempt_num += 1
-            print("-" * 50)
             continue
 
         if guess in already_guessed_words:
@@ -81,7 +79,6 @@ def play_wordle_game(
             # Set the error message for the NEXT turn.
             last_error_message = f"**Previous Attempt Error:** You have already guessed the word '{guess}'. You must try a different word."
             attempt_num += 1
-            print("-" * 50)
             continue
         
         # If we reach here, the guess is a new, valid, 5-letter word.
