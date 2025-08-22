@@ -1,4 +1,5 @@
-from utils.rewards_wordle import format_prompt_for_model, get_feedback, GuessFeedback
+from utils.rewards_wordle import format_prompt_for_model, get_feedback
+from wordle.game import GuessFeedback
 from typing import List
 import utils.config as cfg
 import utils.lora as lora
@@ -88,8 +89,8 @@ def play_wordle_game(
 
 
 if __name__ == "__main__":
-    LORA_CONFIG_FILE_PATH = "./config/grpo_lora_config.json"
-    LORA_ADAPTER_PATH = "./adapters/grpo_lora_wordle/grpo_lora_wordle_300_20250817-091303.npz"
+    LORA_CONFIG_FILE_PATH = "/Users/charbelk/dev/wordle-rl-gemma/experiments/20250820-150425_gemma-3-4b-it-bf16_rank16/grpo_lora_config.json"
+    LORA_ADAPTER_PATH = "/Users/charbelk/dev/wordle-rl-gemma/experiments/20250820-150425_gemma-3-4b-it-bf16_rank16/adapters/grpo_lora_wordle_final_20250820-150425.npz"
     SECRET_WORD = "ROOTS"
 
     training_config = cfg.load_config_from_file(LORA_CONFIG_FILE_PATH)

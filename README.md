@@ -38,7 +38,7 @@ python -m scripts.data_synth --mode rl
 
 ## Run training
 ```sh
-python -m scripts.train_gemma_rl
+python -m scripts.train_gemma_rl --config ./config/grpo_lora_config.json
 ```
 
 ## Plot the cumulative wins during training
@@ -64,7 +64,7 @@ python -m unittest tests.test_cot_wordle_data_generator
 ```
 
 
-## Lessons learned notes:
+# Lessons learned notes:
 
 
 * On smaller models we need SFT LoRA so that the model can follow the structure. the 1B model was not able to follow it properly for example generating the <think></think> and <guess></guess> and even the 5 letters word.
@@ -75,9 +75,20 @@ python -m unittest tests.test_cot_wordle_data_generator
 * Rewards are crucial to get right once the training loop works. It is not a one shot but rather an iterative approach.
 * clipping gradients to keep the training stable is more important and useful than I originally thought. I had to experiment with different hyperparameters to find the sweet spot.
 
+
+### Cold starting
 * how to boost a bit your training, first I didnt generate a previous turns in the wordle rl data. so the model was struggeling to learn.
+* then I added only one guess (history) went up to 30% ish win average rate during training and X % during eval
+* then I added 0-4 attempts and the win average went to and X % during eval. the winning turns jumped.
+GRPO Training Steps:   4%|████████▌                                                                                                                                                                                                  | 21/500 [41:29<9:41:43, 72.87s/it, loss=0.885, reward=-4.30, win%=38.1]
+* your start word matters, start with the top 5 that gives us the highest enthropy.
+
+* the first experiments `180754` and `074356` both contains the data from the possible words and not the answers list which made it a bit easier 
+
 
 * implement a cosine learning rate
+
+
 
 
 ## Design choices

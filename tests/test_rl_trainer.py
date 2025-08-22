@@ -13,8 +13,10 @@ from utils.rl_trainer import (
     evaluate,
     get_log_probs,
     is_nan_or_inf,
-    grpo_loss_and_grad, GameRecord, GameRollout
+    grpo_loss_and_grad
 )
+
+from wordle.game import GameRollout, GameRecord
 
 mock_rl_config = MagicMock()
 mock_rl_config.evaluation.samples = 10
@@ -195,9 +197,33 @@ class TestEvaluateFunction(unittest.TestCase):
 
     def setUp(self):
         self.mock_tokenizer = MagicMock()
-        self.mock_dataset = Dataset.from_list([{'secret': 'TABLE'}, {'secret': 'CHAIR'}, {'secret': 'PLUMB'}])
         self.mock_config = MagicMock()
         self.mock_config.evaluation.samples = 3
+        self.mock_tokenizer = MagicMock()
+        mock_data = [
+            {
+                'secret': 'TABLE', 
+                'messages': [
+                    {'role': 'system', 'content': ''}, # A placeholder for the system message
+                    {'role': 'user', 'content': '...'} # A placeholder for the user prompt
+                ]
+            },
+            {
+                'secret': 'CHAIR', 
+                'messages': [
+                    {'role': 'system', 'content': ''},
+                    {'role': 'user', 'content': '...'}
+                ]
+            },
+            {
+                'secret': 'PLUMB', 
+                'messages': [
+                    {'role': 'system', 'content': ''},
+                    {'role': 'user', 'content': '...'}
+                ]
+            }
+        ]
+        self.mock_dataset = Dataset.from_list(mock_data)
 
     @patch('utils.rl_trainer.play_wordle_game')
     @patch('utils.rl_trainer.log_game_result')

@@ -12,9 +12,8 @@
         "log_steps": 20,
         "checkpoint_steps": 50,
         "resume_from_checkpoint": "",
-        "save_adapter_to": "./adapters/grpo_lora_wordle",
-        "config_file": "./config/grpo_lora_config.json",
-        "data_path": "./data/wordle_cot_data_rl.jsonl"
+        "config_file": "grpo_lora_config.json",
+        "data_path": "data/wordle_cot_data_rl.jsonl"
     },
     "lora": {
         "rank": 16,

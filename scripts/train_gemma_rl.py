@@ -1,12 +1,21 @@
 from utils import prompt
 from utils import config as cfg
 from utils import rl_trainer
+import argparse
 
 if __name__ == "__main__":
-    CONFIG_FILE_PATH = "./config/grpo_lora_config.json"
+    parser = argparse.ArgumentParser(description="Run the GRPO Reinforcement Learning trainer for Wordle.")
+    parser.add_argument(
+        "--config",
+        type=str,
+        required=True,
+        help="Path to the JSON configuration file for the training run."
+    )
+    args = parser.parse_args()
+    print(f"Using configuration file: {args.config}")
     try:
-        config = cfg.load_config_from_file(CONFIG_FILE_PATH)
-        print(f"Successfully loaded configuration from {CONFIG_FILE_PATH}")
+        config = cfg.load_config_from_file(args.config)
+        print(f"Successfully loaded configuration from {args.config}")
     except FileNotFoundError as e:
         print(f"ERROR: {e}")
         print("Please ensure a valid configuration json file.")

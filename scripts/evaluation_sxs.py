@@ -1,0 +1,199 @@
+from utils.rewards_wordle import format_prompt_for_model, get_feedback
+from wordle.game import GuessFeedback
+from typing import List
+import utils.config as cfg
+import utils.lora as lora
+from utils import read_files
+import utils.prompt as prompt
+from mlx_lm import load, generate
+from mlx_lm.sample_utils import make_sampler
+import re
+import random
+import pandas as pd
+import matplotlib.pyplot as plt
+from pathlib import Path
+from tqdm import tqdm 
+
+def play_wordle_game(
+    model,
+    tokenizer,
+    secret_word: str,
+    system_prompt: str,
+    max_trials: int = 6
+):
+    """
+    Plays a game of Wordle using the provided model, providing feedback on
+    formatting errors to encourage self-correction.
+    """
+    print("="*50)
+    print(f"Starting new Wordle game. The secret word is '{secret_word.upper()}'.")
+    print(f"The model has {max_trials} attempts.")
+    print("="*50 + "\n")
+
+    past_guesses: List[GuessFeedback] = []
+    attempt_num = 0
+    already_guessed_words = set()
+    while attempt_num < max_trials:
+        print(f"--- Attempt {attempt_num + 1}/{max_trials} ---")
+        
+        messages = format_prompt_for_model(past_guesses, system_prompt)
+        print(f"💬 sent to model:\n{messages[-1]['content']}")
+        prompt_string = tokenizer.apply_chat_template(
+            messages, 
+            tokenize=True, 
+            add_generation_prompt=True
+        )
+        
+        response = generate(model, tokenizer, prompt=prompt_string, max_tokens=2048)
+        print(f"🤖 Model raw response: {response.strip()}\n")
+
+        match = re.search(r"<guess>(.*?)</guess>", response, re.DOTALL | re.IGNORECASE)
+        
+        if not match:
+            print("⚠️ Model did not use the <guess> tag. Providing feedback.")
+            feedback = GuessFeedback(
+                "",
+                "Your response did not include a guess inside <guess>...</guess> tags. You must provide a guess in the correct format."
+            )
+            past_guesses.append(feedback)
+            # We don't increment the main attempt counter, giving it another chance
+            # Or, to be stricter, you could increment it. Let's be strict.
+            attempt_num += 1
+            print("-" * 50)
+            continue # Move to the next attempt
+
+        guess = re.sub(r'[^A-Z]', '', match.group(1).upper())
+
+        if len(guess) != 5:
+            print(f"⚠️ Model's guess '{guess}' is not 5 letters long. Providing feedback.")
+            feedback = GuessFeedback(
+                guess,
+                f"Your guess '{guess}' was not 5 letters long. You must guess a 5-letter word."
+            )
+            if guess in already_guessed_words:
+                feedback = GuessFeedback(guess, f"This is repeated guess, you already gave that word {guess}, please use another one.")
+            already_guessed_words.add(guess)
+            past_guesses.append(feedback)
+            attempt_num += 1
+            print("-" * 50)
+            continue # Move to the next attempt
+        
+        # If we reach here, the guess is valid
+        feedback = get_feedback(guess, secret_word)
+        print(f"🤖 Model's valid guess: '{guess}', feedback: {feedback.feedback}\n")
+        past_guesses.append(feedback)
+        attempt_num += 1
+
+        if guess == secret_word.upper():
+            print(f"🎉 SUCCESS! The model guessed the secret word {secret_word} correctly in {attempt_num} attempts ! 🎉")
+            return {"solved": True, "turns": attempt_num, "secret_word": secret_word}
+
+    
+        print("-" * 50)
+       
+    print(f"❌ FAILURE! The model did not guess the word '{secret_word.upper()}' within {max_trials} trials. ❌")
+    return {"solved": False, "turns": max_trials, "secret_word": secret_word}
+
+
+def plot_comparison_chart(results_df: pd.DataFrame, output_dir: Path):
+    """Generates and saves a bar chart comparing model win rates."""
+    
+    # Calculate summary stats
+    summary = results_df.groupby('model_name')['solved'].value_counts(normalize=True).unstack(fill_value=0)
+    summary['win_rate'] = summary.get(True, 0) * 100
+    
+    model_names = summary.index
+    win_rates = summary['win_rate']
+    
+    # Plotting
+    plt.style.use('seaborn-v0_8-whitegrid')
+    fig, ax = plt.subplots(figsize=(10, 7))
+    
+    bars = ax.bar(model_names, win_rates, color=['skyblue', 'orangered'])
+    
+    ax.set_ylabel('Win Rate (%)', fontsize=12)
+    ax.set_title('Model Performance Comparison: Wordle Win Rate', fontsize=16, fontweight='bold')
+    ax.set_ylim(0, 100)
+    
+    # Add labels on top of bars
+    for bar in bars:
+        yval = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width()/2.0, yval + 1, f'{yval:.1f}%', ha='center', va='bottom')
+        
+    plt.tight_layout()
+    
+    # Save the plot
+    plot_filename = output_dir / "model_comparison_wins.png"
+    plt.savefig(plot_filename)
+    print(f"\n📈 Comparison plot saved to '{plot_filename}'")
+    plt.show()
+
+if __name__ == "__main__":
+    LORA_CONFIG_FILE_PATH = "/Users/charbelk/dev/wordle-rl-gemma/experiments/20250820-150425_gemma-3-4b-it-bf16_rank16/grpo_lora_config.json"
+    LORA_ADAPTER_PATH = "/Users/charbelk/dev/wordle-rl-gemma/experiments/20250820-150425_gemma-3-4b-it-bf16_rank16/adapters/grpo_lora_wordle_final_20250820-150425.npz"
+
+    NUM_SAMPLES = 100
+    OUTPUT_DIR = Path(LORA_CONFIG_FILE_PATH).parent / "plots"
+
+    # --- 1. Setup: Load words and models ---
+    word_list_url = "https://raw.githubusercontent.com/Roy-Orbison/wordle-guesses-answers/refs/heads/main/answers.txt"
+    all_possible_words = list(read_files.load_word_list_from_url(word_list_url, "./data/nyt_possible_wordle_list.txt"))
+    
+    random.seed(42)
+    secret_words_sample = random.sample(all_possible_words, NUM_SAMPLES)
+    
+    print(f"Selected a random sample of {NUM_SAMPLES} words for side-by-side evaluation.")
+
+
+    training_config = cfg.load_config_from_file(LORA_CONFIG_FILE_PATH)
+    
+    base_model, tokenizer = load(training_config.model.name)
+    sampler = make_sampler(temp=training_config.rl.sampling_temperature)
+    lora_with_base = lora.load_adapter_with_model(training_config=training_config, adapter_path=LORA_ADAPTER_PATH)
+    
+    # --- 2. Run Side-by-Side Evaluation ---
+    all_results = []
+    total_words = len(secret_words_sample)
+    
+    for secret_word in tqdm(secret_words_sample, desc="Playing Wordle Games"):
+        print(f"  -> Playing game: (Secret: {secret_word.upper()})")
+        
+        # Play with Base Model
+        print(f"  -> Base model playing...")
+        base_result = play_wordle_game(base_model, tokenizer, secret_word, prompt.SYSTEM_PROMPT)
+        base_result['model_name'] = 'Base Model'
+        all_results.append(base_result)
+        
+        print(f"  -> LoRA model playing...")
+        # Play with LoRA Model
+        lora_result = play_wordle_game(lora_with_base, tokenizer, secret_word, prompt.SYSTEM_PROMPT)
+        lora_result['model_name'] = 'LoRA Model'
+        all_results.append(lora_result)
+
+    # --- 3. Process and Print Results ---
+    results_df = pd.DataFrame(all_results)
+    
+    # Save the raw results to a CSV file for detailed analysis
+    csv_path = OUTPUT_DIR / "side_by_side_results.csv"
+    results_df.to_csv(csv_path, index=False)
+    print(f"\n📊 Detailed results saved to '{csv_path}'")
+    
+    # Calculate and print summary statistics
+    summary = results_df.groupby('model_name').agg(
+        total_wins=('solved', lambda x: x.sum()),
+        total_games=('solved', 'count'),
+        avg_turns_on_win=('turns', lambda x: x[results_df.loc[x.index, 'solved']].mean())
+    ).reset_index()
+    summary['win_rate'] = (summary['total_wins'] / summary['total_games']) * 100
+
+    print("\n" + "="*60)
+    print(" " * 18 + "SIDE-BY-SIDE EVALUATION RESULTS")
+    print("="*60)
+    for _, row in summary.iterrows():
+        print(f"\n--- {row['model_name']} ---")
+        print(f"  Win Rate: {row['win_rate']:.2f}% ({row['total_wins']}/{row['total_games']})")
+        print(f"  Avg. Turns on Win: {row['avg_turns_on_win']:.2f}")
+    print("\n" + "="*60)
+    
+    # --- 4. Generate the Comparison Plot ---
+    plot_comparison_chart(results_df, OUTPUT_DIR)

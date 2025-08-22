@@ -2,10 +2,9 @@
 import unittest
 from unittest.mock import MagicMock, patch
 from collections import Counter
-
+from wordle.game import GuessFeedback, GameRollout
 from utils.rewards_wordle import (
     calculate_total_reward,
-    GuessFeedback,
     get_feedback,
     calculate_stagnation_penalty,
     format_prompt_for_model

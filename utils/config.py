@@ -21,8 +21,6 @@ class TrainingConfig:
     log_steps: int
     checkpoint_steps: int
     resume_from_checkpoint: str
-    # path to save the adater to
-    save_adapter_to: str
     # Path to save the configuration file
     config_file: str  
     # data path for training and evaluation

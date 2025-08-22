@@ -190,17 +190,14 @@ def get_named_parameters_flat(model_params: dict, prefix: str = ''):
 
 
 # TODO update to use safetensors
-def save_checkpoint(model: nn.Module, save_dir: str, checkpoint_file_name: str, step: str, timestamp: str):
+def save_checkpoint(model: nn.Module, checkpoint_file: str):
     """
     Saves the LoRA adapter weights as a .npz file.
     """
-    os.makedirs(save_dir, exist_ok=True)
     # Get the trainable parameters (which are only the LoRA weights
     #    since the base model is frozen) and flatten them into a dictionary.
     adapter_weights = dict(tree_flatten(model.trainable_parameters()))
     
-    checkpoint_file = os.path.join(save_dir, f"{checkpoint_file_name}_{step}_{timestamp}.npz")
-
     # Save the weights.
     mx.savez(checkpoint_file, **adapter_weights)
     

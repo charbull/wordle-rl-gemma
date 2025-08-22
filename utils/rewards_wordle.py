@@ -14,49 +14,18 @@ from collections import Counter
 import re
 from typing import List
 from mlx_lm import generate
-from dataclasses import dataclass, field
-from utils import read_files
 from utils import config as cfg
 from collections import Counter
-# ==============================================================================
-# ---  DATA STRUCTURES FOR GAME LOGIC ---
-# ==============================================================================
-URL_POSSIBLE_ANSWERS = "https://gist.githubusercontent.com/kcwhite/bb598f1b3017b5477cb818c9b086a5d9/raw/5a0adbbb9830ed93a573cb87a7c14bb5dd0b1883/wordle_possibles.txt"
-LOCAL_FILE_PATH = "./data/nyt_possible_wordle_list.txt"
-# --- Word Lists ---
-ALLOWED_GUESSES = read_files.load_word_list_from_url(URL_POSSIBLE_ANSWERS, LOCAL_FILE_PATH)
-GUESS_TAG_RE = re.compile(r"<guess>(.*?)</guess>", re.DOTALL | re.IGNORECASE)
-# This should only match 5 ALL-CAPS letters
-FIVE_LETTER_WORD_RE = re.compile(r'\b([A-Z]{5})\b')
+from wordle.game import GameRollout, GuessFeedback, GenerationAttempt
+from utils.constants import ALLOWED_GUESSES, GUESS_TAG_RE, FIVE_LETTER_WORD_RE
 
 
 
 
-@dataclass
-class GuessFeedback:
-    """Represents a single guess and its corresponding feedback."""
-    guess: str
-    feedback: str
-    is_in_dictionary: bool = True
 
-@dataclass
-class GenerationAttempt:
-    """Stores all information related to a single model generation attempt in a game."""
-    prompt_string: str
-    prompt_tokens: list
-    full_response: str
-    response_tokens: list
-    parsed_guess: str
-    feedback_given: GuessFeedback
-    game_score: float # The score based only on the guess quality
-    training_reward: float # The final reward for the RL trainer
+
     
-@dataclass
-class GameRollout:
-    """Contains the full history and outcome of one played game."""
-    attempts: List[GenerationAttempt] = field(default_factory=list)
-    secret_word: str = ""
-    solved: bool = False
+
 
 
 def get_feedback(guess: str, secret_word: str) -> GuessFeedback:

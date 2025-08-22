@@ -5,8 +5,8 @@ from mlx_lm import generate, load
 
 
 if __name__ == "__main__":
-    LORA_CONFIG_FILE_PATH = "./config/grpo_lora_config.json"
-    LORA_ADAPTER_PATH = "./adapters/grpo_lora_wordle/grpo_lora_wordle_300_20250817-091303.npz"
+    LORA_CONFIG_FILE_PATH = "/Users/charbelk/dev/wordle-rl-gemma/experiments/20250820-150425_gemma-3-4b-it-bf16_rank16/grpo_lora_config.json"
+    LORA_ADAPTER_PATH = "/Users/charbelk/dev/wordle-rl-gemma/experiments/20250820-150425_gemma-3-4b-it-bf16_rank16/adapters/grpo_lora_wordle_final_20250820-150425.npz"
     training_config = cfg.load_config_from_file(LORA_CONFIG_FILE_PATH)
     
     
