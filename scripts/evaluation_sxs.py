@@ -31,12 +31,10 @@ def play_wordle_game(
     attempt_num = 0
     already_guessed_words = set()
     
-    # NEW: A variable to hold the error message from the PREVIOUS turn.
     last_error_message = None
 
     while attempt_num < max_trials:
-        print(f"--- Attempt {attempt_num + 1}/{max_trials} ---")
-        
+       
         # 1. Generate the prompt using ONLY the history of valid guesses.
         messages = format_prompt_for_model(past_guesses, system_prompt)
         
@@ -89,7 +87,7 @@ def play_wordle_game(
         # If we reach here, the guess is a new, valid, 5-letter word.
         already_guessed_words.add(guess)
         feedback = get_feedback(guess, secret_word)
-        print(f"🤖 Model's valid guess: '{guess}', feedback: {feedback.feedback}\n")
+        print(f"🤖 Turn {attempt_num + 1}/{max_trials} Model's guess: '{guess}', feedback: {feedback.feedback}\n")
         past_guesses.append(feedback) # Add the VALID guess to the history.
         attempt_num += 1
 
