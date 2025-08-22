@@ -19,25 +19,34 @@ def play_wordle_game(
     tokenizer,
     secret_word: str,
     system_prompt: str,
-    max_trials: int = 6
+    max_trials: int = 6,
+    print_debug: bool = False
 ):
     """
-    Plays a game of Wordle using the provided model, providing feedback on
-    formatting errors to encourage self-correction.
+    Plays a game of Wordle using the provided model. Injects feedback for invalid
+    guesses into the prompt without altering the main feedback history.
     """
-    print("="*50)
-    print(f"Starting new Wordle game. The secret word is '{secret_word.upper()}'.")
-    print(f"The model has {max_trials} attempts.")
-    print("="*50 + "\n")
-
+    # This list will only store feedback from valid 5-letter guesses.
     past_guesses: List[GuessFeedback] = []
     attempt_num = 0
     already_guessed_words = set()
+    
+    # NEW: A variable to hold the error message from the PREVIOUS turn.
+    last_error_message = None
+
     while attempt_num < max_trials:
         print(f"--- Attempt {attempt_num + 1}/{max_trials} ---")
         
+        # 1. Generate the prompt using ONLY the history of valid guesses.
         messages = format_prompt_for_model(past_guesses, system_prompt)
-        print(f"💬 sent to model:\n{messages[-1]['content']}")
+        
+        # 2. If there was an error on the last turn, inject the message now.
+        if last_error_message:
+            messages[-1]['content'] += f"\n\n{last_error_message}"
+            last_error_message = None # Clear the message after using it once.
+
+        if print_debug:
+            print(f"💬 sent to model:\n{messages[-1]['content']}")
         prompt_string = tokenizer.apply_chat_template(
             messages, 
             tokenize=True, 
@@ -45,49 +54,48 @@ def play_wordle_game(
         )
         
         response = generate(model, tokenizer, prompt=prompt_string, max_tokens=2048)
-        print(f"🤖 Model raw response: {response.strip()}\n")
+        if print_debug:
+            print(f"🤖 Model raw response: {response.strip()}\n")
 
         match = re.search(r"<guess>(.*?)</guess>", response, re.DOTALL | re.IGNORECASE)
         
         if not match:
-            print("⚠️ Model did not use the <guess> tag. Providing feedback.")
-            feedback = GuessFeedback(
-                "",
-                "Your response did not include a guess inside <guess>...</guess> tags. You must provide a guess in the correct format."
-            )
-            past_guesses.append(feedback)
-            # We don't increment the main attempt counter, giving it another chance
-            # Or, to be stricter, you could increment it. Let's be strict.
+            print("⚠️ Model did not use the <guess> tag. This counts as a failed attempt.")
+            # Set the error message for the NEXT turn.
+            last_error_message = "**Previous Attempt Error:** Your response did not include a guess inside <guess>...</guess> tags. You must provide a guess in the correct format."
             attempt_num += 1
             print("-" * 50)
-            continue # Move to the next attempt
+            continue
 
         guess = re.sub(r'[^A-Z]', '', match.group(1).upper())
 
         if len(guess) != 5:
-            print(f"⚠️ Model's guess '{guess}' is not 5 letters long. Providing feedback.")
-            feedback = GuessFeedback(
-                guess,
-                f"Your guess '{guess}' was not 5 letters long. You must guess a 5-letter word."
-            )
-            if guess in already_guessed_words:
-                feedback = GuessFeedback(guess, f"This is repeated guess, you already gave that word {guess}, please use another one.")
+            print(f"⚠️ Model's guess '{guess}' is not 5 letters long. This counts as a failed attempt.")
             already_guessed_words.add(guess)
-            past_guesses.append(feedback)
+            # Set the error message for the NEXT turn.
+            last_error_message = f"**Previous Attempt Error:** Your guess '{guess}' was not 5 letters long. You must guess a 5-letter word."
             attempt_num += 1
             print("-" * 50)
-            continue # Move to the next attempt
+            continue
+
+        if guess in already_guessed_words:
+            print(f"⚠️ Model's guess '{guess}' is a repeat. This counts as a failed attempt.")
+            # Set the error message for the NEXT turn.
+            last_error_message = f"**Previous Attempt Error:** You have already guessed the word '{guess}'. You must try a different word."
+            attempt_num += 1
+            print("-" * 50)
+            continue
         
-        # If we reach here, the guess is valid
+        # If we reach here, the guess is a new, valid, 5-letter word.
+        already_guessed_words.add(guess)
         feedback = get_feedback(guess, secret_word)
         print(f"🤖 Model's valid guess: '{guess}', feedback: {feedback.feedback}\n")
-        past_guesses.append(feedback)
+        past_guesses.append(feedback) # Add the VALID guess to the history.
         attempt_num += 1
 
         if guess == secret_word.upper():
-            print(f"🎉 SUCCESS! The model guessed the secret word {secret_word} correctly in {attempt_num} attempts ! 🎉")
+            print(f"🎉 SUCCESS! The model guessed the secret word {secret_word.upper()} correctly in {attempt_num} attempts! 🎉")
             return {"solved": True, "turns": attempt_num, "secret_word": secret_word}
-
     
         print("-" * 50)
        
@@ -97,7 +105,18 @@ def play_wordle_game(
 
 def plot_comparison_chart(results_df: pd.DataFrame, output_dir: Path):
     """Generates and saves a bar chart comparing model win rates."""
+    # Since we know both models played the same number of games, we can
+    # simply count the number of unique secret words to find this value.
+    if not results_df.empty:
+        num_games = results_df['secret_word'].nunique()
+    else:
+        num_games = 0
     
+    plot_title = (
+        'Model Performance Comparison: Wordle Win Rate\n'
+        f'(Based on {num_games} games per model)'
+    )
+
     # Calculate summary stats
     summary = results_df.groupby('model_name')['solved'].value_counts(normalize=True).unstack(fill_value=0)
     summary['win_rate'] = summary.get(True, 0) * 100
@@ -112,8 +131,8 @@ def plot_comparison_chart(results_df: pd.DataFrame, output_dir: Path):
     bars = ax.bar(model_names, win_rates, color=['skyblue', 'orangered'])
     
     ax.set_ylabel('Win Rate (%)', fontsize=12)
-    ax.set_title('Model Performance Comparison: Wordle Win Rate', fontsize=16, fontweight='bold')
-    ax.set_ylim(0, 100)
+    ax.set_title(plot_title, fontsize=16, fontweight='bold', pad=20)
+    ax.set_ylim(0, 105)
     
     # Add labels on top of bars
     for bar in bars:
@@ -123,7 +142,7 @@ def plot_comparison_chart(results_df: pd.DataFrame, output_dir: Path):
     plt.tight_layout()
     
     # Save the plot
-    plot_filename = output_dir / "model_comparison_wins.png"
+    plot_filename = output_dir / f"model_comparison_wins_num_games_{num_games}.png"
     plt.savefig(plot_filename)
     print(f"\n📈 Comparison plot saved to '{plot_filename}'")
     plt.show()
@@ -154,21 +173,35 @@ if __name__ == "__main__":
     # --- 2. Run Side-by-Side Evaluation ---
     all_results = []
     total_words = len(secret_words_sample)
-    
-    for secret_word in tqdm(secret_words_sample, desc="Playing Wordle Games"):
+
+    win_counts = {'Base Model': 0, 'LoRA Model': 0}
+
+    # Get a handle on the tqdm object to update it dynamically.
+
+    game_progress_bar = tqdm(secret_words_sample, desc="Playing Wordle Games")
+    for i, secret_word in enumerate(game_progress_bar):
         print(f"  -> Playing game: (Secret: {secret_word.upper()})")
         
+        print_debug = (i % 10 == 0)
         # Play with Base Model
         print(f"  -> Base model playing...")
-        base_result = play_wordle_game(base_model, tokenizer, secret_word, prompt.SYSTEM_PROMPT)
+        base_result = play_wordle_game(base_model, tokenizer, secret_word, prompt.SYSTEM_PROMPT, 6, print_debug)
         base_result['model_name'] = 'Base Model'
         all_results.append(base_result)
+        if base_result['solved']:
+            win_counts['Base Model'] += 1
         
         print(f"  -> LoRA model playing...")
         # Play with LoRA Model
-        lora_result = play_wordle_game(lora_with_base, tokenizer, secret_word, prompt.SYSTEM_PROMPT)
+        lora_result = play_wordle_game(lora_with_base, tokenizer, secret_word, prompt.SYSTEM_PROMPT, 6, print_debug)
         lora_result['model_name'] = 'LoRA Model'
         all_results.append(lora_result)
+
+        if lora_result['solved']:
+            win_counts['LoRA Model'] += 1
+
+        postfix_str = f"Wins -> Base: {win_counts['Base Model']}, LoRA: {win_counts['LoRA Model']}"
+        game_progress_bar.set_postfix_str(postfix_str)
 
     # --- 3. Process and Print Results ---
     results_df = pd.DataFrame(all_results)
