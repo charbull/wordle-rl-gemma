@@ -99,25 +99,4 @@ if __name__ == "__main__":
         results_buffer.clear()
         
     print(f"\n📊 Detailed results saved to '{jsonl_path}'")
-
-    # --- Process and Print Final Results ---
-    with open(jsonl_path, 'r') as f:
-        all_results = [json.loads(line) for line in f]
-    results_df = pd.DataFrame(all_results)
-    
-    # Use 'log_type' to group data by model
-    summary = results_df.groupby('log_type').agg(
-        total_wins=('solved', lambda x: x.sum()),
-        total_games=('solved', 'count'),
-        avg_turns_on_win=('turns_to_solve', lambda x: x[results_df.loc[x.index, 'solved']].mean())
-    ).reset_index()
-    summary['win_rate'] = (summary['total_wins'] / summary['total_games']) * 100
-    
-    print("\n" + "="*60 + "\n" + " " * 18 + "SIDE-BY-SIDE EVALUATION RESULTS" + "\n" + "="*60)
-    for _, row in summary.iterrows():
-        print(f"\n--- {row['log_type']} ---") # Use log_type for model name
-        print(f"  Win Rate: {row['win_rate']:.2f}% ({row['total_wins']}/{row['total_games']})")
-        print(f"  Avg. Turns on Win: {row['avg_turns_on_win']:.2f}")
-    print("\n" + "="*60)
-    
-    plot_comparison_chart(results_df, OUTPUT_DIR, timestamp=eval_timestamp)
+    plot_comparison_chart(jsonl_path)

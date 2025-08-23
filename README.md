@@ -31,7 +31,7 @@ python -m scripts.calculate_word_entropy_mlx
 hf download mlx-community/gemma-3-4b-it-bf16
 ```
 
-## Generate Synth data
+## Generate Synthetic data
 ```sh
 python -m scripts.data_synth --mode rl
 ```

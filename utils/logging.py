@@ -44,8 +44,32 @@ def plot_training_curves(
     print(f"Training curve plot saved to {plot_filename}")
 
 
-def plot_comparison_chart(results_df: pd.DataFrame, output_dir: Path, timestamp: str):
-    """Generates and saves a bar chart comparing model win rates."""
+def plot_comparison_chart(jsonl_path: str):
+    """Generates and saves a bar chart comparing model win rates.
+    
+    Args:
+        jsonl_path: Path to the .jsonl file containing game results.
+    
+    """
+    # --- Process and Print Final Results ---
+    with open(jsonl_path, 'r') as f:
+        all_results = [json.loads(line) for line in f]
+    results_df = pd.DataFrame(all_results)
+    
+    # Use 'log_type' to group data by model
+    summary = results_df.groupby('log_type').agg(
+        total_wins=('solved', lambda x: x.sum()),
+        total_games=('solved', 'count'),
+        avg_turns_on_win=('turns_to_solve', lambda x: x[results_df.loc[x.index, 'solved']].mean())
+    ).reset_index()
+    summary['win_rate'] = (summary['total_wins'] / summary['total_games']) * 100
+    
+    print("\n" + "="*60 + "\n" + " " * 18 + "SIDE-BY-SIDE EVALUATION RESULTS" + "\n" + "="*60)
+    for _, row in summary.iterrows():
+        print(f"\n--- {row['log_type']} ---") # Use log_type for model name
+        print(f"  Win Rate: {row['win_rate']:.2f}% ({row['total_wins']}/{row['total_games']})")
+        print(f"  Avg. Turns on Win: {row['avg_turns_on_win']:.2f}")
+    print("\n" + "="*60)
     # Since we know both models played the same number of games, we can
     # simply count the number of unique secret words to find this value.
     if not results_df.empty:
@@ -83,7 +107,8 @@ def plot_comparison_chart(results_df: pd.DataFrame, output_dir: Path, timestamp:
     plt.tight_layout()
     
     # Save the plot
-    plot_filename = output_dir / f"model_comparison_wins_num_games_{num_games}_{timestamp}.png"
+    output_dir = Path(jsonl_path).parent
+    plot_filename = output_dir / f"model_comparison_wins_num_games_{num_games}.png"
     plt.savefig(plot_filename)
     print(f"\n📈 Comparison plot saved to '{plot_filename}'")
     plt.show()
@@ -161,7 +186,7 @@ def plot_cumulative_wins(metrics_file: Path):
 
     # --- 4. Save the plot ---
     input_filename_stem = metrics_file.stem 
-    plot_filename = metrics_file.parent / f"plots/cumulative_wins_train_vs_eval_{input_filename_stem}.png"
+    plot_filename = metrics_file.parent / f"cumulative_wins_train_vs_eval_{input_filename_stem}.png"
     plt.savefig(plot_filename)
     
     print(f"Successfully generated and saved plot to '{plot_filename}'")

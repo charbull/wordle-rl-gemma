@@ -1,4 +1,0 @@
-{"log_type": "Base Model", "step": 0, "secret_word": "SCALE", "solved": true, "turns_to_solve": 2, "final_reward": -1.0, "loss_at_step": -1.0}
-{"log_type": "LoRA Model", "step": 0, "secret_word": "SCALE", "solved": false, "turns_to_solve": 6, "final_reward": -1.0, "loss_at_step": -1.0}
-{"log_type": "Base Model", "step": 1, "secret_word": "UTILE", "solved": false, "turns_to_solve": 6, "final_reward": -1.0, "loss_at_step": -1.0}
-{"log_type": "LoRA Model", "step": 1, "secret_word": "UTILE", "solved": false, "turns_to_solve": 6, "final_reward": -1.0, "loss_at_step": -1.0}
