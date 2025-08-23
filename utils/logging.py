@@ -44,6 +44,50 @@ def plot_training_curves(
     print(f"Training curve plot saved to {plot_filename}")
 
 
+def plot_comparison_chart(results_df: pd.DataFrame, output_dir: Path, timestamp: str):
+    """Generates and saves a bar chart comparing model win rates."""
+    # Since we know both models played the same number of games, we can
+    # simply count the number of unique secret words to find this value.
+    if not results_df.empty:
+        num_games = results_df['secret_word'].nunique()
+    else:
+        num_games = 0
+    
+    plot_title = (
+        'Model Performance Comparison: Wordle Win Rate\n'
+        f'(Based on {num_games} games per model)'
+    )
+
+    # Calculate summary stats
+    summary = results_df.groupby('log_type')['solved'].value_counts(normalize=True).unstack(fill_value=0)
+    summary['win_rate'] = summary.get(True, 0) * 100
+    
+    model_names = summary.index
+    win_rates = summary['win_rate']
+    
+    # Plotting
+    plt.style.use('seaborn-v0_8-whitegrid')
+    fig, ax = plt.subplots(figsize=(10, 7))
+    
+    bars = ax.bar(model_names, win_rates, color=['skyblue', 'orangered'])
+    
+    ax.set_ylabel('Win Rate (%)', fontsize=12)
+    ax.set_title(plot_title, fontsize=16, fontweight='bold', pad=20)
+    ax.set_ylim(0, 105)
+    
+    # Add labels on top of bars
+    for bar in bars:
+        yval = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width()/2.0, yval + 1, f'{yval:.1f}%', ha='center', va='bottom')
+        
+    plt.tight_layout()
+    
+    # Save the plot
+    plot_filename = output_dir / f"model_comparison_wins_num_games_{num_games}_{timestamp}.png"
+    plt.savefig(plot_filename)
+    print(f"\n📈 Comparison plot saved to '{plot_filename}'")
+    plt.show()
+
 def plot_cumulative_wins(metrics_file: Path):
     """
     Reads a .jsonl metrics file and plots the cumulative number of wins

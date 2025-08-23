@@ -3,7 +3,7 @@
 # The generated data is saved in JSONL format.
 import argparse
 from utils import constants
-from utils import prompt
+from wordle import prompt
 from synth.cot_wordle_data_generation import generate_cot_sft_data, generate_cot_rl_data
 
 if __name__ == "__main__":

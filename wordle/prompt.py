@@ -1,5 +1,3 @@
-INSTRUCTION_PROMPT = "You are an expert Wordle-solving AI. Analyze the provided game state and respond with your chain of thought and your final guess in the specified format."
-
 SYSTEM_PROMPT = """
 You are an expert Wordle-solving AI. Your primary directive is to deduce the secret 5-letter English word with flawless logic and strategy. Adherence to the rules and format is critical.
 

@@ -15,14 +15,14 @@ from tqdm import tqdm
 from pathlib import Path
 from datetime import datetime
 from utils import config as cfg
-from utils import lora
-from utils.rewards_wordle import play_wordle_game, parse_guess
+from ml import lora
 from tensorboardX import SummaryWriter
 from functools import partial
 import numpy as np
 import math
 import re
-from wordle.game import GameRecord
+from wordle.game import GameRecord, play_wordle_game, parse_guess
+from wordle import rewards
 from utils.logging import log_game_result, write_metrics_to_file, log_metrics_to_tensorboard, truncate_jsonl_log, plot_training_curves, plot_cumulative_wins
 
 
@@ -201,7 +201,8 @@ def evaluate(
             config=config,
             sampler=eval_sampler,
             initial_history=sample['messages'][1]['content'],
-            print_debug=True
+            print_debug=(current_step % 10 == 0),
+            reward_fn=None
         )
         eval_record = log_game_result(current_step, -1.0, game_result, 'eval')
         eval_game_outcomes.append(eval_record)
@@ -414,7 +415,8 @@ def train(config: cfg.TrainerConfig, system_prompt: str):
         game_rollout = play_wordle_game(
             model=policy_model, tokenizer=tokenizer, secret_word=sample['secret'],
             system_prompt=system_prompt, config=config, sampler=sampler, initial_history=sample['messages'][1]['content'],
-            print_debug=(step_counter % config.training.log_steps == 0)
+            print_debug=(step_counter % config.training.log_steps == 0),
+            reward_fn=rewards.calculate_total_reward
         )
         
         win_tracker.append(1 if game_rollout.solved else 0)

@@ -1,8 +1,9 @@
 import os
 import requests
 from typing import Set
+from functools import lru_cache
 
-
+@lru_cache(maxsize=None)
 def load_word_list_from_url(url: str, output_path: str) -> Set[str]:
     """
     Loads a set of words from a remote URL.

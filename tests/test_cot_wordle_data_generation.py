@@ -6,7 +6,7 @@ import synth.cot_wordle_data_generation as wdg
 
 class TestWordleGame(unittest.TestCase):
     def setUp(self):
-        self.patcher = patch('utils.rewards_wordle.get_feedback')
+        self.patcher = patch('wordle.game.get_feedback')
         self.mock_get_feedback = self.patcher.start()
         
         def feedback_side_effect(guess, secret_word):
@@ -51,7 +51,7 @@ class TestHelperFunctions(unittest.TestCase):
         self.assertEqual(clues["greys"], {'C', 'E', 'S', 'H'})
         self.assertEqual(clues["yellow_positions"]['N'], {3})
 
-    @patch('utils.rewards_wordle.get_feedback')
+    @patch('wordle.game.get_feedback')
     def test_find_best_guess_entropy(self, mock_get_feedback):
         possible_words = ["BEAST", "FEAST", "LEAST"]
         allowed_guesses = ["FEAST", "BROIL"]

@@ -4,9 +4,9 @@
     },
     "training": {
         "iterations": 4,
-        "learning_rate": 1e-6,
+        "learning_rate": 1e-06,
         "use_lr_scheduler": true,
-        "lr_min": 5e-6,
+        "lr_min": 5e-06,
         "lr_decay_steps": 4,
         "batch_size": 16,
         "log_steps": 2,
@@ -39,23 +39,18 @@
     },
     "reward": {
         "solution_correct_guess": 150.0,
-
         "valid_guess_base": 25.0,
-
         "information_gain_bonus_coeff": 5.0,
         "new_letter_bonus": 1.5,
-
         "length_penalty_per_token": 0.01,
         "time_penalty_per_guess": 1.0,
-        
-        "gray_letter_penalty": 15.0, 
+        "gray_letter_penalty": 15.0,
         "yellow_letter_penalty": 15.0,
         "green_position_penalty": 25.0,
         "green_reuse_penalty": 2.0,
         "yellow_reuse_penalty": 1.0,
-        
         "repetition_penalty": 30.0,
         "not_in_dictionary_penalty": 25.0,
         "format_fail_penalty": 120.0
-   }
+    }
 }

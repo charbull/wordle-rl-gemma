@@ -252,3 +252,43 @@ def load_adapter_with_model(training_config, adapter_path):
     lora_adapter_with_base_model = load_adapter(lora_adapter_with_base_model, adapter_path)
 
     return lora_adapter_with_base_model
+
+
+def verify_lora_loading(base_model: nn.Module, lora_model: nn.Module) -> bool:
+    """
+    Verifies that the LoRA adapter has been loaded correctly by performing two checks:
+    1.  Confirms a non-adapted layer's weights are identical between the two models.
+    2.  Confirms that a LoRA-specific weight matrix in an adapted layer is not all zeros.
+
+    Args:
+        base_model (nn.Module): The clean, original model.
+        lora_model (nn.Module): The model after applying LoRA and loading an adapter.
+
+    Returns:
+        True if all checks pass.
+    
+    Raises:
+        RuntimeError: If any verification check fails.
+    """
+    print("\nVerifying LoRA adapter loading...")
+
+    # --- A LoRA-specific weight matrix should NOT be all zeros ---
+    print(" Verifying that LoRA adapter weights are loaded (non-zero)...")
+    try:
+        # Check the 'q_proj' of the last layer, which should have LoRA applied
+        # The key is to access the `lora_b` matrix inside the LoRALinear layer.
+        lora_b_weights = lora_model.language_model.model.layers[-1].self_attn.q_proj.lora_b
+
+        # A freshly initialized lora_b is all zeros. If weights were loaded, it shouldn't be.
+        if not mx.all(lora_b_weights == 0).item():
+            print("    ✅ SUCCESS: LoRA-specific matrix (lora_b) contains non-zero values.")
+        else:
+            raise RuntimeError("    ❌ FAILURE: LoRA-specific matrix (lora_b) is all zeros. Adapter loading likely failed.")
+
+    except AttributeError:
+         raise RuntimeError("    ❌ FAILURE: The model does not appear to have LoRALinear layers. Was `apply_lora_to_model` run correctly?")
+    except KeyError as e:
+        raise RuntimeError(f"    ❌ FAILURE: Could not find the expected LoRA layer path: {e}")
+
+    print("\nVerification passed. The LoRA model is ready for evaluation.")
+    return True

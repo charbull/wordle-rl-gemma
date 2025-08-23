@@ -1,0 +1,6 @@
+{"log_type": "train", "step": 1, "secret_word": "COYLY", "solved": false, "turns_to_solve": -1, "final_reward": -1.0, "loss_at_step": 0.69140625}
+{"log_type": "train", "step": 2, "secret_word": "HORNY", "solved": true, "turns_to_solve": 4, "final_reward": -140.19, "loss_at_step": 0.7890625}
+{"log_type": "train", "step": 3, "secret_word": "ETUDE", "solved": false, "turns_to_solve": -1, "final_reward": -1.0, "loss_at_step": 4.260551452636719}
+{"log_type": "eval", "step": 3, "secret_word": "WORDY", "solved": false, "turns_to_solve": -1, "final_reward": -1.0, "loss_at_step": -1.0}
+{"log_type": "eval", "step": 3, "secret_word": "MARCH", "solved": false, "turns_to_solve": -1, "final_reward": -1.0, "loss_at_step": -1.0}
+{"log_type": "train", "step": 4, "secret_word": "SPOOL", "solved": false, "turns_to_solve": -1, "final_reward": -1.0, "loss_at_step": 1.448828125}

@@ -1,6 +1,6 @@
-from utils import prompt
+from wordle import prompt
 from utils import config as cfg
-from utils import rl_trainer
+from ml import rl_trainer
 import argparse
 
 if __name__ == "__main__":

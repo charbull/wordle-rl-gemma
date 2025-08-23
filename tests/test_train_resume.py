@@ -3,21 +3,21 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 import tempfile
 import mlx.core as mx
-from utils import rl_trainer
+from ml import rl_trainer
 from utils import config as cfg
 from wordle.game import GameRollout
 from datasets import Dataset
 
-@patch('utils.rl_trainer.write_metrics_to_file')
-@patch('utils.rl_trainer.log_metrics_to_tensorboard')
-@patch('utils.rl_trainer.load_wordle_trajectories_from_jsonl')
-@patch('utils.rl_trainer.truncate_jsonl_log')
-@patch('utils.rl_trainer.evaluate')
-@patch('utils.rl_trainer.plot_training_curves')
-@patch('utils.rl_trainer.play_wordle_game')
-@patch('utils.rl_trainer.SummaryWriter')
-@patch('utils.rl_trainer.lora')
-@patch('utils.rl_trainer.load')
+@patch('ml.rl_trainer.write_metrics_to_file')
+@patch('ml.rl_trainer.log_metrics_to_tensorboard')
+@patch('ml.rl_trainer.load_wordle_trajectories_from_jsonl')
+@patch('ml.rl_trainer.truncate_jsonl_log')
+@patch('ml.rl_trainer.evaluate')
+@patch('ml.rl_trainer.plot_training_curves')
+@patch('ml.rl_trainer.play_wordle_game')
+@patch('ml.rl_trainer.SummaryWriter')
+@patch('ml.rl_trainer.lora')
+@patch('ml.rl_trainer.load')
 class TestTrainerResumeLogic(unittest.TestCase):
     def test_full_resume_workflow(
         self,

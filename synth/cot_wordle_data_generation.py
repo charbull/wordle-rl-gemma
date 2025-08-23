@@ -4,7 +4,8 @@ import math
 import random
 from collections import Counter
 from typing import List, Dict
-from utils import rewards_wordle
+from wordle import rewards
+from wordle.game import get_feedback, format_prompt_for_model
 
 
 # ==============================================================================
@@ -25,7 +26,7 @@ class WordleGame:
     def make_guess(self, guess: str):
         if self.is_over: return
         self.guesses.append(guess)
-        self.feedback.append(rewards_wordle.get_feedback(guess=guess, secret_word=self.secret_word).feedback)
+        self.feedback.append(get_feedback(guess=guess, secret_word=self.secret_word).feedback)
         if guess == self.secret_word.upper() or self.turn >= self.max_turns:
             self.is_over = True
         self.turn += 1
@@ -94,7 +95,7 @@ def find_valid_completions(clues: Dict, word_list: List[str]) -> List[str]:
 # 3. Prompt and Chain-of-Thought Generation
 # ==============================================================================
 
-def format_prompt_cot(game: WordleGame, chosen_completion_word: str, prompt: str) -> List[Dict]:
+def format_prompt_cot(w_game: WordleGame, chosen_completion_word: str, prompt: str) -> List[Dict]:
     """
     Formats the history of guesses into a user-facing prompt string, there is no target data points for RL training.
     This is used to generate the Chain-of-Thought (CoT) reasoning block.
@@ -111,14 +112,14 @@ def format_prompt_cot(game: WordleGame, chosen_completion_word: str, prompt: str
     """
     guess_feedbacks = []
     if chosen_completion_word:
-        guess_feedback = rewards_wordle.get_feedback(guess=chosen_completion_word, secret_word=game.secret_word)  # Ensure feedback is generated for the chosen word
+        guess_feedback = get_feedback(guess=chosen_completion_word, secret_word=w_game.secret_word)  # Ensure feedback is generated for the chosen word
         guess_feedbacks.append(guess_feedback)
-    for guess, feedback in zip(game.guesses, game.feedback):
-        guess_feedbacks.append(rewards_wordle.GuessFeedback(
+    for guess, feedback in zip(w_game.guesses, w_game.feedback):
+        guess_feedbacks.append(rewards.GuessFeedback(
             guess=guess,
             feedback=feedback
         ))
-    format_prompt_msgs = rewards_wordle.format_prompt_for_model(past_feedback=guess_feedbacks, 
+    format_prompt_msgs = format_prompt_for_model(past_feedback=guess_feedbacks, 
                                                   system_prompt=prompt)
     return format_prompt_msgs
 
@@ -179,7 +180,7 @@ def find_best_guess(possible_words: list[str], allowed_guesses: list[str]) -> st
     for guess in guess_pool:
         groups = {}
         for answer in possible_words:
-            guess_feedback = rewards_wordle.get_feedback(guess=guess, secret_word=answer)
+            guess_feedback = get_feedback(guess=guess, secret_word=answer)
             feedback_tuple = (guess_feedback.guess, guess_feedback.feedback)
             groups.setdefault(feedback_tuple, 0)
             groups[feedback_tuple] += 1

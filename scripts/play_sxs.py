@@ -1,9 +1,9 @@
-from utils.rewards_wordle import format_prompt_for_model, get_feedback
+from wordle.rewards import format_prompt_for_model, get_feedback
 from wordle.game import GuessFeedback
 from typing import List
 import utils.config as cfg
-import utils.lora as lora
-import utils.prompt as prompt
+import ml.lora as lora
+import wordle.prompt as prompt
 from mlx_lm import load, generate
 from mlx_lm.sample_utils import make_sampler
 import re

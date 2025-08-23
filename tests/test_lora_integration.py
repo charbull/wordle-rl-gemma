@@ -7,7 +7,7 @@ import mlx.nn as nn
 import mlx.optimizers as optim
 from mlx.utils import tree_flatten, tree_unflatten
 from mlx_lm import load
-from utils import lora
+from ml import lora
 
 TEST_MODEL = "mlx-community/gemma-3-4b-it-bf16" 
 

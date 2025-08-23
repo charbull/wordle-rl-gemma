@@ -2,13 +2,10 @@
 import unittest
 from unittest.mock import MagicMock, patch
 from collections import Counter
-from wordle.game import GuessFeedback, GameRollout
-from utils.rewards_wordle import (
+from wordle.game import GuessFeedback, get_feedback, format_prompt_for_model
+from wordle.rewards import (
     calculate_total_reward,
-    get_feedback,
-    calculate_stagnation_penalty,
-    format_prompt_for_model
-)
+    calculate_stagnation_penalty)
 
 # A fake dictionary of entropy scores to be used by our mock.
 # This simulates the presence of the word_entropy.json file.
@@ -21,7 +18,7 @@ FAKE_ENTROPY_SCORES = {
     "TRAIN": 5.80
 }
 
-@patch('utils.rewards_wordle.WORD_ENTROPY_SCORES', FAKE_ENTROPY_SCORES)
+@patch('utils.constants.WORD_ENTROPY_SCORES', FAKE_ENTROPY_SCORES)
 class TestCalculateTotalReward(unittest.TestCase):
     def setUp(self):
         """Set up a mock config, tokenizer, and standard game state for all tests."""
