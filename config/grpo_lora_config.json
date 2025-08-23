@@ -3,14 +3,14 @@
         "name": "mlx-community/gemma-3-4b-it-bf16"
     },
     "training": {
-        "iterations": 4,
+        "iterations": 300,
         "learning_rate": 1e-6,
         "use_lr_scheduler": true,
         "lr_min": 5e-6,
         "lr_decay_steps": 4,
         "batch_size": 16,
-        "log_steps": 2,
-        "checkpoint_steps": 3,
+        "log_steps": 40,
+        "checkpoint_steps": 50,
         "resume_from_checkpoint": "",
         "config_file": "grpo_lora_config.json",
         "data_path": "data/wordle_cot_data_rl.jsonl"
@@ -22,8 +22,8 @@
         "layers_to_tune": 33
     },
     "evaluation": {
-        "steps": 3,
-        "samples": 2
+        "steps": 30,
+        "samples": 25
     },
     "rl": {
         "num_generations": 2,
