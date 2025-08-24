@@ -7,24 +7,22 @@ import mlx.core as mx
 import mlx.nn as nn
 import mlx.optimizers as optim
 import json
-from datasets import Dataset
 from mlx.utils import tree_flatten, tree_unflatten
 from mlx_lm import load
 from mlx_lm.sample_utils import make_sampler
 from tqdm import tqdm
 from pathlib import Path
 from datetime import datetime
-from utils import config as cfg
-from ml import lora
+from src.utils import config as cfg
+from src.ml import lora
 from tensorboardX import SummaryWriter
-from functools import partial
 import numpy as np
 import math
 import re
-from wordle.game import GameRecord, play_wordle_game, parse_guess
-from wordle import rewards
-from utils.logging import log_game_result, write_metrics_to_file, log_metrics_to_tensorboard, truncate_jsonl_log, plot_training_curves, plot_cumulative_wins
-
+from src.wordle.game import GameRecord, play_wordle_game, prepare_data
+from src.wordle import rewards
+from src.utils.logging import log_game_result, write_metrics_to_file, log_metrics_to_tensorboard, truncate_jsonl_log, plot_training_curves, plot_cumulative_wins
+from collections import deque
 
 # ==============================================================================
 # ---  HELPER FUNCTIONS ---
@@ -55,6 +53,49 @@ def pad_sequences(token_lists: List[List[int]], pad_value: int) -> mx.array:
 
 def is_nan_or_inf(x):
     return mx.isnan(x).any().item() or mx.isinf(x).any().item()
+
+def rehydrate_win_tracker(log_file: Path, maxlen: int) -> deque:
+    """
+    Reads the end of a .jsonl log file to pre-populate the win_tracker deque,
+    ensuring the rolling win rate is accurate after resuming a run.
+
+    Args:
+        log_file: Path to the training_metrics.jsonl file.
+        maxlen: The maximum size of the deque (should match win_tracker's maxlen).
+
+    Returns:
+        A deque object pre-populated with recent win/loss history.
+    """
+    win_tracker = deque(maxlen=maxlen)
+    
+    if not log_file.exists():
+        return win_tracker # Return empty deque if log file doesn't exist
+
+    print(f"Re-hydrating win rate tracker from {log_file}...")
+    
+    # Read all training records from the log file
+    records = []
+    with open(log_file, 'r') as f:
+        for line in f:
+            try:
+                record = json.loads(line)
+                if record.get('log_type') == 'train':
+                    records.append(record)
+            except json.JSONDecodeError:
+                continue # Skip malformed lines
+
+    # Sort by step to be safe, then take the last `maxlen` records
+    records.sort(key=lambda r: r.get('step', 0))
+    
+    # Populate the deque with 1 for a win and 0 for a loss
+    for record in records[-maxlen:]: # Only need the last `maxlen` games
+        win_tracker.append(1 if record.get('solved', False) else 0)
+        
+    if win_tracker:
+        initial_win_rate = (sum(win_tracker) / len(win_tracker)) * 100
+        print(f"Win rate tracker re-hydrated. Initial rolling win rate: {initial_win_rate:.1f}%")
+        
+    return win_tracker
 # ==============================================================================
 # ---  LOSS FUNCTION ---
 # ==============================================================================
@@ -212,61 +253,7 @@ def evaluate(
 # ==============================================================================
 # --- DATA LOADING ---
 # ==============================================================================
-def load_wordle_trajectories_from_jsonl(dataset_path: str) -> Dataset:
-    """Loads Wordle game trajectories from a JSONL file into a HuggingFace Dataset."""
-    print(f"Loading game trajectories from: {dataset_path}")
-    game_trajectories = []
-    try:
-        with open(dataset_path, 'r') as f:
-            for line in f:
-                if line.strip():
-                    data_point = json.loads(line)
-                    data_content = data_point.get("data", {})
-                    secret_word = data_content.get("secret")
-                    messages = data_content.get("messages")
-                    
-                    if secret_word and messages:
-                        game_trajectories.append({
-                            "secret": secret_word.upper(),
-                            "messages": messages
-                        })
-    except FileNotFoundError:
-        print(f"ERROR: Dataset file not found at '{dataset_path}'")
-        raise
-    except json.JSONDecodeError as e:
-        print(f"ERROR: Could not parse JSON from '{dataset_path}'. Error: {e}")
-        raise
 
-    if not game_trajectories:
-        raise ValueError("No game trajectories were loaded from the dataset.")
-
-    dataset = Dataset.from_list(game_trajectories)
-    print(f"Successfully loaded {len(dataset)} game trajectories.")
-    return dataset
-
-
-def is_playable_trajectory(example, max_trials: int):
-    """
-    Checks if a game trajectory is playable.
-
-    A trajectory is NOT playable if:
-    1. It has already been solved.
-    2. It has already reached or exceeded the maximum number of trials.
-    """
-    secret_word = example['secret'].upper()
-    assistant_messages = [m for m in example['messages'] if m.get("role") == "assistant"]
-
-    # Check 2: Has the game already used all its turns?
-    if len(assistant_messages) >= max_trials:
-        return False # This game is already over (likely a loss)
-
-    # Check 1: Has the game already been solved?
-    for message in assistant_messages:
-        guess = parse_guess(message.get("content", ""))
-        if guess and guess == secret_word:
-            return False # This game was already solved
-            
-    return True # This game is unsolved and has turns remaining
 
 # ==============================================================================
 # --- MAIN TRAINING ---
@@ -275,28 +262,24 @@ def train(config: cfg.TrainerConfig, system_prompt: str):
     """Main training loop for the GRPO-based Wordle solver."""
     print(f"MLX is using default device: {mx.default_device()}")
     print(f"Loading base model: {config.model.name}")
+    step_counter = 1 # Start from 1 for human-readable steps
 
-    step_counter = 1
     if config.training.resume_from_checkpoint:
         checkpoint_path = Path(config.training.resume_from_checkpoint)
         if not checkpoint_path.is_file():
             raise FileNotFoundError(f"Resume checkpoint not found at: {checkpoint_path}")
 
         run_dir = checkpoint_path.parent.parent
-        run_name = run_dir.name
-        timestamp = run_name.split('_')[0]
+        timestamp = run_dir.name.split('_')[0]
         
         match = re.search(r'_(\d+)\.npz$', checkpoint_path.name)
         if match:
-            # The checkpoint was saved *after* the completed_step was done.
-            # So we start the next iteration.
+            # Checkpoint was saved after step N completed. We start the next step.
             step_counter = int(match.group(1)) + 1
-            print(f"Resuming from timestamp: {timestamp} at step {step_counter}")
         else:
             raise ValueError(f"Could not parse step number from checkpoint name: {checkpoint_path.name}")
 
-        print(f"Resuming run from directory: {run_dir}")
-        print(f"Resuming from timestamp: {timestamp} at step {step_counter}")
+        print(f"Resuming run from directory: {run_dir} at step {step_counter}")
     else:
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         model_name_short = config.model.name.split('/')[-1]
@@ -305,26 +288,25 @@ def train(config: cfg.TrainerConfig, system_prompt: str):
         
         print(f"Starting new run. All artifacts will be saved in: {run_dir}")
         run_dir.mkdir(parents=True, exist_ok=True)
-        config_path = f"{run_dir}/{config.training.config_file}"
-        cfg.save_config(config, config_path)
+        cfg.save_config(config, run_dir / config.training.config_file)
 
-    # --- 2. DEFINE ALL PATHS ---
     adapter_dir = run_dir / "adapters"
     tensorboard_dir = run_dir / "tensorboard"
     plots_dir = run_dir / "plots"
     metrics_file_path = run_dir / "training_metrics.jsonl"
-
     for d in [adapter_dir, tensorboard_dir, plots_dir]:
         d.mkdir(parents=True, exist_ok=True)
-
-    # --- 3. SETUP LOGGING ---
+    
     print(f"TensorBoard logs will be saved to: {tensorboard_dir}")
     writer = SummaryWriter(str(tensorboard_dir))
-
     print(f"Detailed game metrics will be saved to: {metrics_file_path}")
-    if config.training.resume_from_checkpoint and step_counter > 0:
-        print(f"Truncating logs to step {step_counter}...")
-        truncate_jsonl_log(metrics_file_path, step_counter)
+
+    # Initialize win_tracker (can now be done in one place)
+    win_tracker = deque(maxlen=config.training.iterations)
+    if config.training.resume_from_checkpoint:
+        # Truncate first, then re-hydrate from the cleaned file
+        truncate_jsonl_log(metrics_file_path, step_counter -1) # Truncate up to the last completed step
+        win_tracker = rehydrate_win_tracker(metrics_file_path, maxlen=config.training.iterations)
 
     dataset_path = config.training.data_path
     if not Path(dataset_path).exists():
@@ -369,26 +351,9 @@ def train(config: cfg.TrainerConfig, system_prompt: str):
         tokenizer.pad_token_id = tokenizer.eos_token_id
     pad_id = tokenizer.pad_token_id
 
-    dataset = load_wordle_trajectories_from_jsonl(dataset_path)
-    print(f"Original dataset size: {len(dataset)}")
+    train_dataset, validation_dataset, test_dataset = prepare_data(config)
+    print(f"Dataset split: {len(train_dataset)} train, {len(validation_dataset)} validation, {len(test_dataset)} test samples.")
 
-    # Create a filter function that knows about max_trials from your config
-    max_trials_for_filter = config.rl.max_trials
-    playable_filter = partial(is_playable_trajectory, max_trials=max_trials_for_filter)
-
-    # Apply filter
-    playable_dataset = dataset.filter(playable_filter)
-    print(f"Filtered dataset size (playable games only): {len(playable_dataset)}")
-
-    # Now, use the fully cleaned dataset for training
-    shuffled_dataset = playable_dataset.shuffle(seed=42)
-    
-    train_percentage = 0.85 # Use a 85/15 split
-
-    num_train_samples = int(len(shuffled_dataset) * train_percentage)
-    train_dataset = shuffled_dataset.select(range(num_train_samples))
-    test_dataset = shuffled_dataset.select(range(num_train_samples, len(shuffled_dataset)))
-    print(f"Dataset split: {len(train_dataset)} training samples, {len(test_dataset)} evaluation samples.")
     # This fn will be called with JAX-style value_and_grad and will 
     # return both loss and grads, Tuple[mx.array, Dict].
     # This is a dictionary containing the gradients of the loss with respect
@@ -503,7 +468,7 @@ def train(config: cfg.TrainerConfig, system_prompt: str):
             avg_loss = total_loss / num_micro_batches
 
             grad_values = list(avg_grads.values())
-            clipped_grad_values, _ = optim.clip_grad_norm(grad_values, 1.0)
+            clipped_grad_values, _ = optim.clip_grad_norm(grad_values, config.grpo.clip_epsilon)
             clipped_grads_dict = dict(zip(avg_grads.keys(), clipped_grad_values))
             
             updated_params = optimizer.apply_gradients(clipped_grads_dict, trainable_params)
@@ -547,7 +512,7 @@ def train(config: cfg.TrainerConfig, system_prompt: str):
 
             # Evaluate the model on the test dataset
             eval_game_outcomes = evaluate(
-                policy_model, tokenizer, test_dataset, config, system_prompt, step_counter)
+                policy_model, tokenizer, validation_dataset, config, system_prompt, step_counter)
             if eval_game_outcomes:
                 eval_wins = sum(1 for r in eval_game_outcomes if r.solved)
                 eval_total = len(eval_game_outcomes)
@@ -589,3 +554,4 @@ def train(config: cfg.TrainerConfig, system_prompt: str):
     )
     plot_cumulative_wins(metrics_file_path)
     print("Done.")
+

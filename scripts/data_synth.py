@@ -2,9 +2,9 @@
 # It can generate data for either Supervised Fine-Tuning (SFT) or Reinforcement Learning (RL) modes.
 # The generated data is saved in JSONL format.
 import argparse
-from utils import constants
-from wordle import prompt
-from synth.cot_wordle_data_generation import generate_cot_sft_data, generate_cot_rl_data
+from src.utils import constants
+from src.wordle import prompt
+from src.synth.cot_wordle_data_generation import generate_cot_sft_data, generate_cot_rl_data
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate synthetic Wordle data for SFT or RL training.")

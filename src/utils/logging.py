@@ -1,6 +1,6 @@
 from typing import List
 import matplotlib.pyplot as plt
-from wordle.game import GameRecord, GameRollout
+from src.wordle.game import GameRecord, GameRollout
 from pathlib import Path
 import json
 from dataclasses import asdict

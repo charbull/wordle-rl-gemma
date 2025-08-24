@@ -7,7 +7,7 @@ import mlx.nn as nn
 import mlx.optimizers as optim
 from mlx.utils import tree_flatten, tree_unflatten
 from mlx_lm import load
-from ml import lora
+from src.ml import lora
 
 TEST_MODEL = "mlx-community/gemma-3-4b-it-bf16" 
 
@@ -50,7 +50,14 @@ class TestCheckpointResumeLogic(unittest.TestCase):
             print("Step 2: Simulating a training step...")
             optimizer = optim.AdamW(learning_rate=1e-4)
             fake_grads = {k: mx.random.normal(v.shape) for k, v in initial_lora_params.items()}
-            
+
+            # Log gradient information for the specific parameter
+            if "language_model.model.layers.18.self_attn.q_proj.lora_a" in fake_grads:
+                print("Gradient for 'language_model.model.layers.18.self_attn.q_proj.lora_a':", 
+                      fake_grads["language_model.model.layers.18.self_attn.q_proj.lora_a"].sum())
+            else:
+                print("Parameter 'language_model.model.layers.18.self_attn.q_proj.lora_a' not found in gradients.")
+
             updated_params = optimizer.apply_gradients(fake_grads, initial_lora_params)
             model_to_train.update(tree_unflatten(list(updated_params.items())))
             mx.eval(model_to_train.parameters())

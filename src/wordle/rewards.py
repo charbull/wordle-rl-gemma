@@ -1,11 +1,9 @@
-import json
-import config as cfg
 from collections import Counter
 from typing import List
-from utils import config as cfg
+from src.utils import config as cfg
 from collections import Counter
-from wordle.game import GuessFeedback, parse_guess, is_valid_guess
-from utils import constants
+from src.wordle.game import GuessFeedback, parse_guess, is_valid_guess, find_valid_completions, get_clue_summary, get_feedback
+from src.utils import constants
 
 
 
@@ -85,6 +83,35 @@ def calculate_stagnation_penalty(guess: str, known_green: dict, known_yellow: Co
             penalty += yellow_reuse_penalty
             
     return penalty
+
+def reward_for_possibility_reduction(
+    past_feedback: List[GuessFeedback], 
+    new_feedback: GuessFeedback, 
+    config: cfg.TrainerConfig
+) -> float:
+    """
+    Calculates a reward based on how much a guess reduces the number of
+    possible remaining answers.
+    """
+    if not past_feedback: # Not applicable for the first real guess
+        return 0.0
+
+    # Find possibilities BEFORE the new guess
+    clues_before = get_clue_summary([f.guess for f in past_feedback], [f.feedback for f in past_feedback])
+    possibilities_before = find_valid_completions(clues_before, constants.ANSWERS_WORDS)
+    
+    # Find possibilities AFTER the new guess
+    combined_feedback = past_feedback + [new_feedback]
+    clues_after = get_clue_summary([f.guess for f in combined_feedback], [f.feedback for f in combined_feedback])
+    possibilities_after = find_valid_completions(clues_after, constants.ANSWERS_WORDS)
+
+    # The bonus is proportional to the percentage of possibilities eliminated
+    if not possibilities_before: return 0.0
+    
+    reduction_fraction = (len(possibilities_before) - len(possibilities_after)) / len(possibilities_before)
+    
+    return reduction_fraction * config.reward.get("possibility_reduction_bonus", 10.0)
+
 
 def calculate_total_reward(
     response: str,
@@ -217,6 +244,10 @@ def calculate_total_reward(
     strategic_bonus = get_strategic_bonus(guess, past_feedback, config)
     potential_score = reward_config.get("valid_guess_base") + strategic_bonus
     
+    current_feedback = get_feedback(guess, secret_word)
+    reduction_bonus = reward_for_possibility_reduction(past_feedback, current_feedback, config)
+    potential_score += reduction_bonus
+
     # 7. Calculate final scores.
     game_score = potential_score - total_penalty
     training_reward = game_score + time_penalty + length_penalty

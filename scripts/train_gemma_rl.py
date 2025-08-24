@@ -1,6 +1,6 @@
-from wordle import prompt
-from utils import config as cfg
-from ml import rl_trainer
+from src.wordle import prompt
+from src.utils import config as cfg
+from src.ml import rl_trainer
 import argparse
 
 if __name__ == "__main__":

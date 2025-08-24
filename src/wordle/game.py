@@ -1,11 +1,15 @@
 from dataclasses import dataclass, field
 from typing import List
-from utils.constants import ALLOWED_GUESSES, FIVE_LETTER_WORD_RE, GUESS_TAG_RE
+from src.utils.constants import ALLOWED_GUESSES, FIVE_LETTER_WORD_RE, GUESS_TAG_RE
 import re
 from collections import Counter
 from mlx_lm import generate
-from utils import config as cfg
-from typing import Callable, Optional
+from src.utils import config as cfg
+from typing import Callable, Dict, Optional
+import json
+from datasets import Dataset
+from functools import partial
+
 # ==============================================================================
 # ---  DATA STRUCTURES FOR GAME LOGIC ---
 # ==============================================================================
@@ -48,8 +52,162 @@ class GameRollout:
     solved: bool = False
 
 # ==============================================================================
+# --- Data Loading ---
+# ==============================================================================
+def load_wordle_trajectories_from_jsonl(dataset_path: str) -> Dataset:
+    """Loads Wordle game trajectories from a JSONL file into a HuggingFace Dataset."""
+    print(f"Loading game trajectories from: {dataset_path}")
+    game_trajectories = []
+    try:
+        with open(dataset_path, 'r') as f:
+            for line in f:
+                if line.strip():
+                    data_point = json.loads(line)
+                    data_content = data_point.get("data", {})
+                    secret_word = data_content.get("secret")
+                    messages = data_content.get("messages")
+                    
+                    if secret_word and messages:
+                        game_trajectories.append({
+                            "secret": secret_word.upper(),
+                            "messages": messages
+                        })
+    except FileNotFoundError:
+        print(f"ERROR: Dataset file not found at '{dataset_path}'")
+        raise
+    except json.JSONDecodeError as e:
+        print(f"ERROR: Could not parse JSON from '{dataset_path}'. Error: {e}")
+        raise
+
+    if not game_trajectories:
+        raise ValueError("No game trajectories were loaded from the dataset.")
+
+    dataset = Dataset.from_list(game_trajectories)
+    print(f"Successfully loaded {len(dataset)} game trajectories.")
+    return dataset
+
+
+def _is_playable_trajectory(example, max_trials: int):
+    """
+    Checks if a game trajectory is playable.
+
+    A trajectory is NOT playable if:
+    1. It has already been solved.
+    2. It has already reached or exceeded the maximum number of trials.
+    """
+    secret_word = example['secret'].upper()
+    assistant_messages = [m for m in example['messages'] if m.get("role") == "assistant"]
+
+    # Check 2: Has the game already used all its turns?
+    if len(assistant_messages) >= max_trials:
+        return False # This game is already over (likely a loss)
+
+    # Check 1: Has the game already been solved?
+    for message in assistant_messages:
+        guess = parse_guess(message.get("content", ""))
+        if guess and guess == secret_word:
+            return False # This game was already solved
+            
+    return True # This game is unsolved and has turns remaining
+
+
+def prepare_data(config: cfg.TrainerConfig, seed: int = 42) -> tuple[Dataset, Dataset, Dataset]:
+    """Loads and prepares the dataset, applying filtering and splitting.
+    
+    Args:
+        config: Trainer configuration with data path and RL settings.
+
+    Returns:
+        A tuple of (train_dataset, validation_dataset, test_dataset).
+    
+    """
+    dataset = load_wordle_trajectories_from_jsonl(config.training.data_path)
+    print(f"Original dataset size: {len(dataset)}")
+
+    # Create a filter function that knows about max_trials from your config
+    max_trials_for_filter = config.rl.max_trials
+    playable_filter = partial(_is_playable_trajectory, max_trials=max_trials_for_filter)
+
+    # Apply filter
+    playable_dataset = dataset.filter(playable_filter)
+    print(f"Filtered dataset size (playable games only): {len(playable_dataset)}")
+
+    # Now, use the fully cleaned dataset for training
+    shuffled_dataset = playable_dataset.shuffle(seed=seed)
+    train_end = int(0.70 * len(shuffled_dataset))
+    validation_end = int(0.85 * len(shuffled_dataset))
+    
+    train_dataset = shuffled_dataset.select(range(0, train_end))
+    validation_dataset = shuffled_dataset.select(range(train_end, validation_end))
+    test_dataset = shuffled_dataset.select(range(validation_end, len(shuffled_dataset)))
+    return train_dataset,validation_dataset,test_dataset
+
+# ==============================================================================
 # ---  GAME LOGIC FUNCTIONS ---
 # ==============================================================================
+def find_valid_completions(clues: Dict, word_list: List[str]) -> List[str]:
+    valid_words = []
+    for word in word_list:
+        word = word.upper()
+        is_valid = True
+        word_counts = Counter(word)
+
+        # Check against greens (must match position)
+        for i, letter in enumerate(clues['greens']):
+            if letter != '_' and word[i] != letter:
+                is_valid = False
+                break
+        if not is_valid: continue
+
+        # Check against greys (must not be in the word, unless it's a duplicate of a green/yellow letter)
+        for letter in clues['greys']:
+            if letter in word_counts:
+                is_valid = False
+                break
+        if not is_valid: continue
+        
+        # Check against yellows (must be present, but not in the guessed position)
+        if not all(letter in word_counts for letter in clues['yellows']):
+            is_valid = False
+            continue
+
+        for letter, positions in clues['yellow_positions'].items():
+            for pos in positions:
+                if word[pos] == letter:
+                    is_valid = False
+                    break
+            if not is_valid: break
+        if not is_valid: continue
+
+        valid_words.append(word)
+    return valid_words
+
+def get_clue_summary(guesses: List[str], feedback: List[List[str]]) -> Dict:
+    greens = ['_'] * 5
+    yellows = set()
+    greys = set()
+    yellow_positions = {chr(ord('A') + i): set() for i in range(26)}
+    for guess, fb in zip(guesses, feedback):
+        guess = guess.upper()
+        # This removes spaces to create 'GGYXX' for correct processing.
+        fb = fb.replace(" ", "")
+        for i, (letter, status) in enumerate(zip(guess, fb)):
+            if status == 'G':
+                greens[i] = letter
+                if letter in yellows: yellows.remove(letter)
+            elif status == 'Y':
+                yellows.add(letter)
+                yellow_positions[letter].add(i)
+            elif status == 'X':
+                # Only add to greys if not confirmed green or yellow
+                if letter not in "".join(greens) and letter not in yellows:
+                    greys.add(letter)
+    return {"greens": greens, "yellows": yellows, "greys": greys, "yellow_positions": yellow_positions}
+
+# ==============================================================================
+# ---  CORE GAMEPLAY FUNCTION ---
+# =============================================================================
+
 def get_feedback(guess: str, secret_word: str) -> GuessFeedback:
     """
     Given a guess and the secret word, returns the feedback string in the format:
@@ -213,7 +371,7 @@ def play_wordle_game(
     secret_word: str,
     system_prompt: str,
     config: cfg.TrainerConfig,
-    sampler,
+    sampler, # TODO: remove the sampler and use config.rl.temperature settings directly
     initial_history: str,
     print_debug = False,
     reward_fn: Optional[Callable] = None,

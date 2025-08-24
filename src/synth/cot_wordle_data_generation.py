@@ -2,10 +2,9 @@ import json
 import time
 import math
 import random
-from collections import Counter
 from typing import List, Dict
-from wordle import rewards
-from wordle.game import get_feedback, format_prompt_for_model
+from src.wordle import rewards
+from src.wordle.game import get_feedback, format_prompt_for_model, find_valid_completions, get_clue_summary
 
 
 # ==============================================================================
@@ -31,65 +30,9 @@ class WordleGame:
             self.is_over = True
         self.turn += 1
 
-def get_clue_summary(guesses: List[str], feedback: List[List[str]]) -> Dict:
-    greens = ['_'] * 5
-    yellows = set()
-    greys = set()
-    yellow_positions = {chr(ord('A') + i): set() for i in range(26)}
-    for guess, fb in zip(guesses, feedback):
-        guess = guess.upper()
-        # This removes spaces to create 'GGYXX' for correct processing.
-        fb = fb.replace(" ", "")
-        for i, (letter, status) in enumerate(zip(guess, fb)):
-            if status == 'G':
-                greens[i] = letter
-                if letter in yellows: yellows.remove(letter)
-            elif status == 'Y':
-                yellows.add(letter)
-                yellow_positions[letter].add(i)
-            elif status == 'X':
-                # Only add to greys if not confirmed green or yellow
-                if letter not in "".join(greens) and letter not in yellows:
-                    greys.add(letter)
-    return {"greens": greens, "yellows": yellows, "greys": greys, "yellow_positions": yellow_positions}
 
 
-def find_valid_completions(clues: Dict, word_list: List[str]) -> List[str]:
-    valid_words = []
-    for word in word_list:
-        word = word.upper()
-        is_valid = True
-        word_counts = Counter(word)
 
-        # Check against greens (must match position)
-        for i, letter in enumerate(clues['greens']):
-            if letter != '_' and word[i] != letter:
-                is_valid = False
-                break
-        if not is_valid: continue
-
-        # Check against greys (must not be in the word, unless it's a duplicate of a green/yellow letter)
-        for letter in clues['greys']:
-            if letter in word_counts:
-                is_valid = False
-                break
-        if not is_valid: continue
-        
-        # Check against yellows (must be present, but not in the guessed position)
-        if not all(letter in word_counts for letter in clues['yellows']):
-            is_valid = False
-            continue
-
-        for letter, positions in clues['yellow_positions'].items():
-            for pos in positions:
-                if word[pos] == letter:
-                    is_valid = False
-                    break
-            if not is_valid: break
-        if not is_valid: continue
-
-        valid_words.append(word)
-    return valid_words
 
 # ==============================================================================
 # 3. Prompt and Chain-of-Thought Generation

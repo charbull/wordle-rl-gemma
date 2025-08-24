@@ -2,10 +2,11 @@
 import unittest
 from unittest.mock import MagicMock, patch
 from collections import Counter
-from wordle.game import GuessFeedback, get_feedback, format_prompt_for_model
-from wordle.rewards import (
+from src.wordle.game import GuessFeedback, get_feedback, format_prompt_for_model
+from src.wordle.rewards import (
     calculate_total_reward,
-    calculate_stagnation_penalty)
+    calculate_stagnation_penalty,
+    reward_for_possibility_reduction)
 
 # A fake dictionary of entropy scores to be used by our mock.
 # This simulates the presence of the word_entropy.json file.
@@ -18,7 +19,7 @@ FAKE_ENTROPY_SCORES = {
     "TRAIN": 5.80
 }
 
-@patch('utils.constants.WORD_ENTROPY_SCORES', FAKE_ENTROPY_SCORES)
+@patch('src.utils.constants.WORD_ENTROPY_SCORES', FAKE_ENTROPY_SCORES)
 class TestCalculateTotalReward(unittest.TestCase):
     def setUp(self):
         """Set up a mock config, tokenizer, and standard game state for all tests."""
@@ -31,6 +32,7 @@ class TestCalculateTotalReward(unittest.TestCase):
             "information_gain_bonus_coeff": 2.0, # For Turn 1
             "new_letter_bonus": 1.5,              # For each new letter on Turns > 1
 
+            "possibility_reduction_bonus": 10.0,  # Bonus for reducing possible words
             # Behavioral Penalties
             "length_penalty_per_token": 0.01,
             "time_penalty_per_guess": 1.0,
@@ -104,7 +106,8 @@ class TestCalculateTotalReward(unittest.TestCase):
         )
         self.assertAlmostEqual(game_score, expected_score)
 
-    def test_turn2_uses_new_letter_exploration_bonus(self):
+    @patch('src.wordle.rewards.reward_for_possibility_reduction', return_value=0.0)
+    def test_turn2_uses_new_letter_exploration_bonus(self, mock_reduction_bonus):
         """On Turn 2+, the strategic bonus should be for introducing new, unseen letters."""
         # On Turn 1, we guessed 'CRANE'. C,R,A,N,E are now "known letters".
         past_feedback = [GuessFeedback(guess="CRANE", feedback="X X X X X")]
@@ -120,7 +123,8 @@ class TestCalculateTotalReward(unittest.TestCase):
         )
         self.assertAlmostEqual(game_score, expected_score)
 
-    def test_turn2_bonus_is_correct_for_mixed_new_and_old_letters(self):
+    @patch('src.wordle.rewards.reward_for_possibility_reduction', return_value=0.0)
+    def test_turn2_bonus_is_correct_for_mixed_new_and_old_letters(self, mock_reduction_bonus):
         """REVISED: Tests the exploration bonus with a clear, unambiguous state."""
         secret_word = "GHOST"
         # Turn 1: Guessed 'TRAIN'. Feedback vs GHOST is all gray.
@@ -289,7 +293,8 @@ class TestCalculateTotalReward(unittest.TestCase):
         
         self.assertAlmostEqual(game_score, expected_score)
 
-    def test_game_state_from_stage_log(self):
+    @patch('src.wordle.rewards.reward_for_possibility_reduction', return_value=0.0)
+    def test_game_state_from_stage_log(self, mock_reduction_bonus):
         """
         REGRESSION TEST: Precisely recreates the game state from the debug log
         for the secret word 'STAGE' to validate both clue aggregation and
@@ -341,7 +346,8 @@ class TestCalculateTotalReward(unittest.TestCase):
         
         self.assertAlmostEqual(game_score, expected_score)
 
-    def test_game_state_from_stage_log_2(self):
+    @patch('src.wordle.rewards.reward_for_possibility_reduction', return_value=0.0)
+    def test_game_state_from_stage_log_2(self, mock_reduction_bonus):
         """
         REGRESSION TEST: Precisely recreates the game state from the debug log
         for the secret word 'STAGE' to validate both clue aggregation and
@@ -617,6 +623,96 @@ class TestFormatPromptForModel(unittest.TestCase):
         expected_content = "\n".join(expected_lines)
         self.assertEqual(user_content, expected_content)
 
+
+class TestPossibilityReductionReward(unittest.TestCase):
+
+    def setUp(self):
+        """Set up a mock config for these tests."""
+        self.mock_config = MagicMock()
+        self.mock_config.reward = {
+            "possibility_reduction_bonus": 10.0
+        }
+
+    @patch('src.wordle.rewards.find_valid_completions')
+    def test_calculates_bonus_correctly(self, mock_find_completions):
+        """
+        Tests that the bonus is calculated correctly based on the reduction
+        of possible words.
+        """
+        # --- 1. SETUP ---
+        
+        # Simulate a game history
+        past_feedback = [GuessFeedback(guess="ARISE", feedback="Y X X X X")]
+        # The new guess that causes the reduction
+        new_feedback = GuessFeedback(guess="CLOUD", feedback="X Y X X X")
+        
+        # Configure the mock to simulate the reduction
+        # Let's say there were 100 possible words before the guess...
+        possibilities_before = ["WORD"] * 100
+        # ...and only 20 possible words after the guess.
+        possibilities_after = ["WORD"] * 20
+        
+        # The mock will return these lists when called
+        mock_find_completions.side_effect = [possibilities_before, possibilities_after]
+
+        # --- 2. CALCULATE EXPECTED RESULT ---
+        
+        # Reduction = (100 - 20) / 100 = 0.8
+        reduction_fraction = (100 - 20) / 100
+        # Bonus = 0.8 * 10.0 (from config) = 8.0
+        expected_bonus = reduction_fraction * self.mock_config.reward["possibility_reduction_bonus"]
+        
+        # --- 3. EXECUTE ---
+        
+        actual_bonus = reward_for_possibility_reduction(
+            past_feedback, new_feedback, self.mock_config
+        )
+        
+        # --- 4. ASSERT ---
+        
+        self.assertAlmostEqual(actual_bonus, expected_bonus)
+        # Verify that find_valid_completions was called twice, as expected
+        self.assertEqual(mock_find_completions.call_count, 2)
+
+    @patch('src.wordle.rewards.find_valid_completions')
+    def test_returns_zero_if_no_reduction(self, mock_find_completions):
+        """
+        Tests that the bonus is 0 if the guess provides no new information.
+        """
+        past_feedback = [GuessFeedback(guess="ARISE", feedback="Y X X X X")]
+        new_feedback = GuessFeedback(guess="USELESS", feedback="X X X X X")
+        
+        # Simulate no reduction in possibilities
+        possibilities_before = ["WORD"] * 100
+        possibilities_after = ["WORD"] * 100
+        mock_find_completions.side_effect = [possibilities_before, possibilities_after]
+        
+        expected_bonus = 0.0
+        
+        actual_bonus = reward_for_possibility_reduction(
+            past_feedback, new_feedback, self.mock_config
+        )
+        
+        self.assertAlmostEqual(actual_bonus, expected_bonus)
+        
+    @patch('src.wordle.rewards.find_valid_completions')
+    def test_returns_zero_on_first_turn(self, mock_find_completions):
+        """
+        Tests that the bonus is 0 on the first turn of the game.
+        """
+        # On the first turn, past_feedback is empty
+        past_feedback = []
+        new_feedback = GuessFeedback(guess="SLATE", feedback="G X X X X")
+        
+        expected_bonus = 0.0
+        
+        actual_bonus = reward_for_possibility_reduction(
+            past_feedback, new_feedback, self.mock_config
+        )
+        
+        self.assertAlmostEqual(actual_bonus, expected_bonus)
+        # Verify that find_valid_completions was NOT called
+        mock_find_completions.assert_not_called()
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

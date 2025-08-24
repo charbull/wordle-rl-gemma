@@ -3,21 +3,22 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 import tempfile
 import mlx.core as mx
-from ml import rl_trainer
-from utils import config as cfg
-from wordle.game import GameRollout
+from src.ml import rl_trainer
+from src.utils import config as cfg
+from src.wordle.game import GameRollout
 from datasets import Dataset
 
-@patch('ml.rl_trainer.write_metrics_to_file')
-@patch('ml.rl_trainer.log_metrics_to_tensorboard')
-@patch('ml.rl_trainer.load_wordle_trajectories_from_jsonl')
-@patch('ml.rl_trainer.truncate_jsonl_log')
-@patch('ml.rl_trainer.evaluate')
-@patch('ml.rl_trainer.plot_training_curves')
-@patch('ml.rl_trainer.play_wordle_game')
-@patch('ml.rl_trainer.SummaryWriter')
-@patch('ml.rl_trainer.lora')
-@patch('ml.rl_trainer.load')
+@patch('src.ml.rl_trainer.plot_cumulative_wins')
+@patch('src.ml.rl_trainer.write_metrics_to_file')
+@patch('src.ml.rl_trainer.log_metrics_to_tensorboard')
+@patch('src.ml.rl_trainer.prepare_data')
+@patch('src.ml.rl_trainer.truncate_jsonl_log')
+@patch('src.ml.rl_trainer.evaluate')
+@patch('src.ml.rl_trainer.plot_training_curves')
+@patch('src.ml.rl_trainer.play_wordle_game')
+@patch('src.ml.rl_trainer.SummaryWriter')
+@patch('src.ml.rl_trainer.lora')
+@patch('src.ml.rl_trainer.load')
 class TestTrainerResumeLogic(unittest.TestCase):
     def test_full_resume_workflow(
         self,
@@ -28,9 +29,10 @@ class TestTrainerResumeLogic(unittest.TestCase):
         mock_plot,
         mock_evaluate,
         mock_truncate_log,
-        mock_load_data,
+        mock_prepare_data,
         mock_log_tensorboard,
-        mock_write_metrics
+        mock_write_metrics,
+        mock_plot_wins
     ):
         """
         Integration test to verify the trainer's resume logic.
@@ -96,7 +98,13 @@ class TestTrainerResumeLogic(unittest.TestCase):
             mock_load_model.return_value = (mock_policy_model, MagicMock())
             mock_lora.apply_lora_to_model.return_value = mock_policy_model
             mock_lora.load_adapter.return_value = mock_policy_model
-            mock_load_data.return_value = Dataset.from_list([{'secret': 'MOCK', 'messages': [{'role':'system'}, {'content':''}]}] * 100)
+
+            mock_train_ds = Dataset.from_list([{'secret': 'MOCK', 'messages': [{'role':'system'}, {'content':''}]}] * 100)
+            mock_val_ds = Dataset.from_list([{'secret': 'MOCK', 'messages': [{'role':'system'}, {'content':''}]}] * 100)
+            mock_test_ds = Dataset.from_list([{'secret': 'MOCK', 'messages': [{'role':'system'}, {'content':''}]}] * 100)
+            
+            # Make the mock function return a tuple of these three objects
+            mock_prepare_data.return_value = (mock_train_ds, mock_val_ds, mock_test_ds)
 
             # Make the mocked evaluate function return an empty list to avoid downstream errors
             mock_evaluate.return_value = []
@@ -107,7 +115,7 @@ class TestTrainerResumeLogic(unittest.TestCase):
             # --- ASSERT ---
             # 1. Verify resume setup was triggered. This remains the same.
             # The log should be truncated AT the completed step.
-            mock_truncate_log.assert_called_once_with(Path(run_dir / "training_metrics.jsonl"), resume_step+1)
+            mock_truncate_log.assert_called_once_with(Path(run_dir / "training_metrics.jsonl"), resume_step)
             mock_lora.load_adapter.assert_called_once()
 
             # 2. Verify the training loop ran for the new, correct number of steps

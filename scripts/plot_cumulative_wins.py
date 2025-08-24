@@ -1,7 +1,7 @@
 
 from pathlib import Path
 import argparse
-from utils.logging import plot_cumulative_wins, plot_comparison_chart
+from src.utils.logging import plot_cumulative_wins, plot_comparison_chart
 
 
 

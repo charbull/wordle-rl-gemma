@@ -36,6 +36,12 @@ hf download mlx-community/gemma-3-4b-it-bf16
 python -m scripts.data_synth --mode rl
 ```
 
+## Empty your RAM
+
+```sh
+sudo pruge
+```
+
 ## Run training
 ```sh
 python -m scripts.train_gemma_rl --config ./config/grpo_lora_config.json

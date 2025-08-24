@@ -2,11 +2,11 @@ import unittest
 import json
 from unittest.mock import patch, MagicMock
 import io
-import synth.cot_wordle_data_generation as wdg
+import src.synth.cot_wordle_data_generation as wdg
 
 class TestWordleGame(unittest.TestCase):
     def setUp(self):
-        self.patcher = patch('wordle.game.get_feedback')
+        self.patcher = patch('src.wordle.game.get_feedback')
         self.mock_get_feedback = self.patcher.start()
         
         def feedback_side_effect(guess, secret_word):
@@ -51,7 +51,7 @@ class TestHelperFunctions(unittest.TestCase):
         self.assertEqual(clues["greys"], {'C', 'E', 'S', 'H'})
         self.assertEqual(clues["yellow_positions"]['N'], {3})
 
-    @patch('wordle.game.get_feedback')
+    @patch('src.wordle.game.get_feedback')
     def test_find_best_guess_entropy(self, mock_get_feedback):
         possible_words = ["BEAST", "FEAST", "LEAST"]
         allowed_guesses = ["FEAST", "BROIL"]
@@ -85,7 +85,7 @@ class TestHelperFunctions(unittest.TestCase):
 
 class TestDataGenerationPipeline(unittest.TestCase):
 
-    @patch('synth.cot_wordle_data_generation.find_best_guess')
+    @patch('src.synth.cot_wordle_data_generation.find_best_guess')
     @patch('random.choice')
     @patch('random.randint')
     def test_generate_rl_data_point_with_history(self, mock_randint, mock_choice, mock_find_best_guess):
@@ -133,7 +133,7 @@ class TestDataGenerationPipeline(unittest.TestCase):
         self.assertIn("**Words Already Guessed:** OTHER, SOARE, GRAZE, GAINS", user_prompt)
 
         
-    @patch('synth.cot_wordle_data_generation.find_best_guess')
+    @patch('src.synth.cot_wordle_data_generation.find_best_guess')
     @patch('random.choice')
     @patch('random.randint')
     def test_generate_rl_data_point_no_history(self, mock_randint, mock_choice, mock_find_best_guess):

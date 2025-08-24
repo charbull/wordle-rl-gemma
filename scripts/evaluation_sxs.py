@@ -1,18 +1,14 @@
-import json
 import time
-from wordle import game
+from src.wordle import game
 from typing import List
 from mlx_lm import load
 from mlx_lm.sample_utils import make_sampler
-import random
-import pandas as pd
 from pathlib import Path
 from tqdm import tqdm
-from utils import constants
-from utils.logging import plot_comparison_chart, write_metrics_to_file
-import utils.config as cfg
-import ml.lora as lora
-import wordle.prompt as prompt
+from src.utils.logging import plot_comparison_chart, write_metrics_to_file
+import src.utils.config as cfg
+import src.ml.lora as lora
+import src.wordle.prompt as prompt
 
 
 
@@ -20,7 +16,7 @@ if __name__ == "__main__":
     LORA_CONFIG_FILE_PATH = "/Users/charbelk/dev/wordle-rl-gemma/experiments/20250820-150425_gemma-3-4b-it-bf16_rank16/grpo_lora_config.json"
     LORA_ADAPTER_PATH = "/Users/charbelk/dev/wordle-rl-gemma/experiments/20250820-150425_gemma-3-4b-it-bf16_rank16/adapters/grpo_lora_wordle_final_20250820-150425.npz"
 
-    NUM_SAMPLES = 2
+    NUM_SAMPLES = 100
     LOG_INTERVAL = 10
     OUTPUT_DIR = Path(LORA_CONFIG_FILE_PATH).parent / "plots"
     eval_timestamp = time.strftime("%Y%m%d-%H%M%S")
@@ -29,11 +25,6 @@ if __name__ == "__main__":
     results_buffer: List[game.GameRecord] = []
     win_counts = {'Base Model': 0, 'LoRA Model': 0}
     
-    # --- 1. Setup: Load words and models ---
-    all_possible_words = list(constants.ANSWERS_WORDS)
-    
-    random.seed(42)
-    secret_words_sample = random.sample(all_possible_words, NUM_SAMPLES)
     
     print(f"Selected a random sample of {NUM_SAMPLES} words for side-by-side evaluation.")
 
@@ -41,6 +32,10 @@ if __name__ == "__main__":
     training_config = cfg.load_config_from_file(LORA_CONFIG_FILE_PATH)
     training_config.rl.sampling_temperature = 0.0  # Deterministic sampling for evaluation
     training_config.rl.num_generations = 1  # Single generation per prompt
+    # get the same split and use the test set
+    _, _, test_dataset = game.prepare_data(config=training_config)
+
+
 
     # --- 2. Prepare the LoRA Model ---
     print("\nLoading and preparing the LoRA-finetuned model...")
@@ -67,12 +62,12 @@ if __name__ == "__main__":
     eval_sampler = make_sampler(temp=0.0)
     
     # --- 2. Run Side-by-Side Evaluation ---
-    total_words = len(secret_words_sample)
-
+    total_words = len(test_dataset)
 
     # Get a handle on the tqdm object to update it dynamically.
-    pbar = tqdm(enumerate(secret_words_sample), total=NUM_SAMPLES, desc="Playing Wordle Games")
-    for i, secret_word in pbar:
+    pbar = tqdm(enumerate(test_dataset), total=NUM_SAMPLES, desc="Playing Wordle Games")
+    for i, sample in pbar:
+        secret_word = sample['secret']
         print(f"  -> Playing game: (Secret: {secret_word.upper()})")
         
         print_debug = (i % 10 == 0)

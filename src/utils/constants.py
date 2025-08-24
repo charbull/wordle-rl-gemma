@@ -1,5 +1,5 @@
 import re
-from utils import read_files
+from src.utils import read_files
 import json
 
 URL_ALLOWED_GUESSES = "https://gist.githubusercontent.com/kcwhite/bb598f1b3017b5477cb818c9b086a5d9/raw/5a0adbbb9830ed93a573cb87a7c14bb5dd0b1883/wordle_possibles.txt"

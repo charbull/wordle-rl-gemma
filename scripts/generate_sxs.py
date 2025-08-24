@@ -1,6 +1,6 @@
-import utils.config as cfg
-import ml.lora as lora
-import wordle.prompt as prompt
+import src.utils.config as cfg
+import src.ml.lora as lora
+import src.wordle.prompt as prompt
 from mlx_lm import generate, load
 
 

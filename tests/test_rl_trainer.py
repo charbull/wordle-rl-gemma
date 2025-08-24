@@ -5,13 +5,12 @@ import json
 import mlx.core as mx
 import mlx.nn as nn
 from datasets import Dataset
-from wordle.game import GameRollout, GameRecord
+from src.wordle.game import GameRollout, GameRecord, load_wordle_trajectories_from_jsonl
 
 
-from ml.rl_trainer import (
+from src.ml.rl_trainer import (
     pad_sequences,
     get_named_parameters_flat,
-    load_wordle_trajectories_from_jsonl,
     evaluate,
     get_log_probs,
     is_nan_or_inf,
@@ -118,7 +117,7 @@ class TestGRPOLoss(unittest.TestCase):
         self.mock_policy_model = MagicMock()
         self.mock_ref_model = MagicMock()
 
-    @patch('ml.rl_trainer.get_log_probs')
+    @patch('src.ml.rl_trainer.get_log_probs')
     def test_positive_loss_when_policy_improves(self, mock_get_log_probs):
         mock_get_log_probs.side_effect = [
             mx.array([-1.0]), mx.array([-5.0]), # policy
@@ -132,7 +131,7 @@ class TestGRPOLoss(unittest.TestCase):
 
         self.assertGreater(loss.item(), 0)
 
-    @patch('ml.rl_trainer.get_log_probs')
+    @patch('src.ml.rl_trainer.get_log_probs')
     def test_loss_when_no_change(self, mock_get_log_probs):
         """Loss should be -log(0.5) if policy and ref have same preferences."""
         mock_get_log_probs.side_effect = [
@@ -155,7 +154,7 @@ class TestGRPOLoss(unittest.TestCase):
         Verifies that adding a KL penalty increases the total loss.
         """
         # Make the policy much less confident than the reference model
-        with patch('ml.rl_trainer.get_log_probs') as mock_get_log_probs:
+        with patch('src.ml.rl_trainer.get_log_probs') as mock_get_log_probs:
             mock_get_log_probs.side_effect = [
                 # First call for policy_model
                 mx.array([-10.0]), # policy winner log_prob (low confidence)
@@ -175,7 +174,7 @@ class TestGRPOLoss(unittest.TestCase):
             )
 
         # Reset the mock for the second calculation
-        with patch('ml.rl_trainer.get_log_probs') as mock_get_log_probs:
+        with patch('src.ml.rl_trainer.get_log_probs') as mock_get_log_probs:
             mock_get_log_probs.side_effect = [
                 mx.array([-10.0]), mx.array([-11.0]),
                 mx.array([-5.0]),  mx.array([-6.0])
@@ -226,8 +225,8 @@ class TestEvaluateFunction(unittest.TestCase):
         ]
         self.mock_dataset = Dataset.from_list(mock_data)
 
-    @patch('ml.rl_trainer.play_wordle_game')
-    @patch('utils.logging.log_game_result')
+    @patch('src.ml.rl_trainer.play_wordle_game')
+    @patch('src.utils.logging.log_game_result')
     def test_evaluation_metrics(self, mock_log_game_result, mock_play_wordle_game):
         # --- 1. Setup Mocks ---
         # We need to simulate the GameRollout objects that play_wordle_game returns
