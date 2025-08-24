@@ -82,6 +82,37 @@ python -m unittest tests.test_cot_wordle_data_generator
 * clipping gradients to keep the training stable is more important and useful than I originally thought. I had to experiment with different hyperparameters to find the sweet spot.
 
 
+### Number of generations and KV Cache
+
+The KV Cache: The "Working Memory" of the Transformer
+What it is: A Transformer model (like Gemma) works by paying attention to all the previous tokens in a sequence to predict the next one. To do this efficiently, after it processes each token, it stores the calculated "Key" (K) and "Value" (V) vectors for that token in a cache. For the next token, it doesn't need to re-calculate everything from the beginning; it just uses the stored values in the KV cache. This makes generation much faster.
+How Big is it? The KV cache is enormous. Its size is determined by:
+ (Number of Layers) * (Context Length) * (Hidden Dimension) * (Number of Heads) * (Bytes per Parameter)
+For a 4B parameter model, this cache can easily be several gigabytes for a single sequence of a few hundred tokens.
+How num_generations Causes a Memory Explosion
+Here is the critical part. When you ask the mlx_lm.generate function to produce multiple independent sequences (which is what num_generations > 1 does under the hood, even if you call it in a loop), it needs to maintain a separate KV Cache for each parallel generation.
+Let's look at the memory impact:
+num_generations = 1:
+The model needs memory for its own weights.
+It creates one large KV Cache to generate a single response.
+Memory Usage: Model Weights + 1 * (KV Cache Size)
+num_generations = 2:
+The model needs memory for its weights.
+It creates and holds two separate KV Caches in memory at the same time to generate the two different candidate guesses.
+Memory Usage: Model Weights + 2 * (KV Cache Size)
+num_generations = 4:
+The model needs memory for its weights.
+It must create and hold four separate KV Caches in memory simultaneously.
+Memory Usage: Model Weights + 4 * (KV Cache Size)
+The Final Equation
+The increase in memory is not linear with the number of output words; it's multiplicative with the size of the entire KV Cache.
+If a single KV Cache for your Gemma 4B model takes up 5 GB of RAM, then:
+Running with num_generations = 2 adds 2 * 5 GB = 10 GB of peak memory usage.
+Running with num_generations = 4 adds 4 * 5 GB = 20 GB of peak memory usage.
+This extra 10 GB of required RAM from doubling the generations is likely exactly what pushed your 48 GB system over the edge and into a state of heavy swapping.
+Conclusion:
+Increasing num_generations is one of the most memory-intensive things you can do during training. Unlike increasing the LoRA rank (which adds only a few megabytes), increasing the number of parallel generations can add many gigabytes to your memory footprint because of the need to maintain multiple, massive KV Caches. This is why reducing it back to 2 is the most effective way to solve your memory swapping problem.
+
 ### Cold starting
 * how to boost a bit your training, first I didnt generate a previous turns in the wordle rl data. so the model was struggeling to learn.
 * then I added only one guess (history) went up to 30% ish win average rate during training and X % during eval

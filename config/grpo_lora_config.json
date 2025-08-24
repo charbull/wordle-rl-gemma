@@ -27,7 +27,7 @@
     },
     "rl": {
         "num_generations": 2,
-        "max_completion_length": 350,
+        "max_completion_length": 512,
         "sampling_temperature": 0.9,
         "max_trials": 6
     },
