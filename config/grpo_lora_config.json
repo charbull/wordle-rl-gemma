@@ -4,16 +4,18 @@
     },
     "training": {
        "iterations": 500,
-        "learning_rate": 5e-6,
+        "learning_rate": 1e-6,
         "use_lr_scheduler": true,
-        "lr_min": 5e-7,
+        "lr_min": 1e-7,
         "lr_decay_steps": 500,
         "checkpoint_steps": 50,
         "batch_size": 16,
         "log_steps": 20,
         "resume_from_checkpoint": "",
         "config_file": "grpo_lora_config.json",
-        "data_path": "data/wordle_cot_data_rl.jsonl"
+        "data_path": "data/wordle_cot_data_rl.jsonl",
+        "early_stopping_patience": 10,
+        "use_early_stopping": true
     },
     "lora": {
          "rank": 64,             
@@ -56,6 +58,6 @@
 
         "repetition_penalty": 40.0,
         "not_in_dictionary_penalty": 35.0,
-        "format_fail_penalty": 120.0
+        "format_fail_penalty": 200.0
    }
 }

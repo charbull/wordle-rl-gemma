@@ -25,6 +25,10 @@ class TrainingConfig:
     config_file: str  
     # data path for training and evaluation
     data_path: str
+    # early stopping
+    early_stopping_patience: Optional[int] = None
+    use_early_stopping: Optional[bool] = False
+
 
 @dataclass
 class LoRAConfig:

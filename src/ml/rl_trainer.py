@@ -27,6 +27,54 @@ from collections import deque
 # ==============================================================================
 # ---  HELPER FUNCTIONS ---
 # ==============================================================================
+# In utils/rl_trainer.py
+
+from collections import deque
+from typing import Deque
+
+def check_early_stopping(
+    recent_win_rates: Deque[float],
+    recent_rewards: Deque[float],
+    current_win_rate: float,
+    current_avg_reward: float,
+    patience: int
+) -> bool:
+    """
+    Checks if the early stopping condition has been met.
+
+    Args:
+        recent_win_rates: Deque tracking recent win rates.
+        recent_rewards: Deque tracking recent average rewards.
+        current_win_rate: The win rate from the latest interval.
+        current_avg_reward: The average reward from the latest interval.
+        patience: The number of consecutive stable steps required to stop.
+
+    Returns:
+        True if training should stop, False otherwise.
+    """
+    # 1. Add the latest metrics to our trackers
+    recent_win_rates.append(round(current_win_rate, 2))
+    recent_rewards.append(round(current_avg_reward, 2))
+    
+    # 2. Check for the stopping condition
+    # The condition is met if the tracker is full and all its elements are identical.
+    should_stop = (
+        len(recent_win_rates) == patience and len(set(recent_win_rates)) == 1 and
+        len(recent_rewards) == patience and len(set(recent_rewards)) == 1
+    )
+    
+    if should_stop:
+        print("\n" + "="*80)
+        print(f"EARLY STOPPING TRIGGERED:")
+        print(f"Win rate has been stable at {recent_win_rates[0]}% for {patience} evaluation steps.")
+        print(f"Average reward has been stable at {recent_rewards[0]} for {patience} evaluation steps.")
+        print("The model has likely converged or collapsed. Halting training.")
+        print("="*80)
+        return True
+        
+    return False
+
+
 def from_trainable_parameters(model_instance: nn.Module, trainable_params: dict):
     model_instance.update(tree_unflatten(list(trainable_params.items())))
     return model_instance
@@ -250,10 +298,6 @@ def evaluate(
 
     model.train()
     return eval_game_outcomes
-# ==============================================================================
-# --- DATA LOADING ---
-# ==============================================================================
-
 
 # ==============================================================================
 # --- MAIN TRAINING ---
@@ -303,6 +347,9 @@ def train(config: cfg.TrainerConfig, system_prompt: str):
 
     # Initialize win_tracker (can now be done in one place)
     win_tracker = deque(maxlen=config.training.iterations)
+    patience = config.training.early_stopping_patience
+    recent_win_rates = deque(maxlen=patience)
+    recent_rewards = deque(maxlen=patience)
     if config.training.resume_from_checkpoint:
         # Truncate first, then re-hydrate from the cleaned file
         truncate_jsonl_log(metrics_file_path, step_counter -1) # Truncate up to the last completed step
@@ -499,6 +546,18 @@ def train(config: cfg.TrainerConfig, system_prompt: str):
                 
                 interval_win_rewards = [r.final_reward for r in training_game_outcomes if r.solved]
                 avg_interval_reward = np.mean(interval_win_rewards) if interval_win_rewards else 0.0
+
+                # Early Stopping Check
+                if config.training.use_early_stopping:
+                    rolling_win_rate = (sum(win_tracker) / len(win_tracker)) * 100 if win_tracker else 0.0
+                    if check_early_stopping(
+                        recent_win_rates=recent_win_rates,
+                        recent_rewards=recent_rewards,
+                        current_win_rate=rolling_win_rate,
+                        current_avg_reward=avg_interval_reward,
+                        patience=patience
+                    ):
+                        break # Exit the main training loop
                 
                 train_steps.append(step_counter)
                 train_losses.append(avg_interval_loss)

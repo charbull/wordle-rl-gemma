@@ -153,9 +153,13 @@ def calculate_total_reward(
 
     # Handle Game Rule Violations
     if not guess:
+        # This ensures that a short, empty response is not rewarded over a
+        # long but incorrect attempt. 
+        # avoid reward hacking by returning a very negative score
         game_score = -reward_config.get("format_fail_penalty")
-        return game_score, game_score + time_penalty + length_penalty
-
+        training_reward = game_score + time_penalty + length_penalty    
+        return game_score, training_reward
+    
     if guess == secret_word.upper():
         game_score = reward_config.get("solution_correct_guess")
         return game_score, game_score + time_penalty + length_penalty
