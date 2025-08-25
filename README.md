@@ -308,3 +308,61 @@ Provide your reasoning within <think> tags, and then your final guess within <gu
 wordle play: guess 'STILT' against secret 'STILL', generated feedback is 'G G G G X'
 
 ### without history
+
+
+
+
+
+
+
+
+
+
+## Summary of the Reinforcement Learning Reward Strategy
+
+This document outlines the reward strategy used to train an AI agent to play Wordle. The goal is to teach the agent not only to win but to do so efficiently and strategically by following the game's rules and making intelligent guesses.
+
+The system calculates two primary values for each guess:
+1.  **Game Score**: A score that reflects the quality of the Wordle guess itself.
+2.  **Training Reward**: The `game_score` adjusted by penalties for efficiency (like turn count and response length), which is used directly to update the model during training.
+
+The total reward is a composite of several components, categorized into penalties for mistakes and bonuses for good strategy.
+
+#### 1. Penalties for Rule Violations and Mistakes (The "Stick")
+
+These are strong negative rewards designed to quickly teach the agent the fundamental rules and constraints of the game.
+
+*   **Invalid Formatting (`format_fail_penalty`):** A large penalty is applied if the model's response does not contain a valid 5-letter word. This is the most basic rule.
+*   **Repeated Guesses (`repetition_penalty`):** The agent is penalized for guessing a word it has already used in the current game.
+*   **Clue Inconsistency:** The agent is heavily penalized for making guesses that contradict information from previous turns. The system maintains a state of known letters:
+    *   **Green Letters:** Known letters in their correct positions.
+    *   **Yellow Letters:** Known letters that are in the word but in the wrong position.
+    *   **Gray Letters:** Known letters that are not in the word at all.
+    Penalties are applied for:
+    *   **Green Violation (`green_position_penalty`):** Not placing a known green letter in its correct spot.
+    *   **Yellow Violation (`yellow_letter_penalty`):** Failing to include a known yellow letter anywhere in the guess.
+    *   **Gray Violation (`gray_letter_penalty`):** Using a letter that has previously been identified as gray.
+*   **Invalid Word (`not_in_dictionary_penalty`):** A penalty is applied if the guess is a 5-letter word but is not in the official Wordle dictionary.
+
+#### 2. Bonuses for Strategic Play (The "Carrot")
+
+These are positive rewards designed to encourage intelligent, information-seeking behavior.
+
+*   **Winning the Game (`solution_correct_guess`):** A large, positive reward is given for correctly guessing the secret word, as this is the ultimate objective.
+*   **Base Reward for a Valid Guess (`valid_guess_base`):** Any valid, non-losing guess receives a small base reward to encourage participation.
+*   **Strategic Information Gain (Turn-Dependent):** The system uses two different strategies to reward information gain based on the turn number.
+    *   **Turn 1: Information Gain Bonus (`information_gain_bonus_coeff`):** For the first guess, the agent is rewarded based on a pre-calculated entropy score for its chosen word. This encourages the use of optimal starting words (like "SOARE" or "CRANE") that are statistically most likely to reveal the most information about the secret word.
+    *   **Turns 2-6: New Letter Exploration Bonus (`new_letter_bonus`):** After the first turn, the strategy shifts to rewarding exploration. The agent receives a bonus for each new, previously unused letter it includes in its guess. This encourages the agent to use its turns to test new characters and narrow down the possibilities.
+*   **Possibility Reduction Bonus (`possibility_reduction_bonus`):** This is a direct reward for making an informative guess. The system calculates the number of possible remaining answers before and after the current guess. The reward is proportional to the percentage of possible solutions that were eliminated by the guess, directly incentivizing moves that prune the search space effectively.
+
+#### 3. Penalties for Inefficiency
+
+These are "soft" penalties designed to refine the agent's behavior, encouraging it to be not just correct, but also efficient.
+
+*   **Stagnation Penalty:** This discourages wasting a guess by reusing known information inefficiently.
+    *   **Green Reuse (`green_reuse_penalty`):** A penalty for placing a known green letter in its correct spot again. That letter slot is already "solved," so it should be used to test a new letter if possible.
+    *   **Yellow Reuse (`yellow_reuse_penalty`):** A penalty for using a known yellow letter in a guess. This encourages the agent to use "eliminator" words with all-new letters to discover more greens and yellows, rather than just rearranging known yellows.
+*   **Time Penalty (`time_penalty_per_guess`):** A small, constant penalty is applied for every guess made. This incentivizes the agent to solve the puzzle in as few turns as possible.
+*   **Response Length Penalty (`length_penalty_per_token`):** A minor penalty is applied based on the total number of tokens in the model's generated response (including its reasoning). This encourages concise output.
+
+By combining these elements, the reward strategy guides the agent to become a proficient Wordle player that respects the rules, employs intelligent information-gathering tactics, and aims to solve the puzzle efficiently.
