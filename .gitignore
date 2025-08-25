@@ -148,4 +148,4 @@ venv.bak/
 # PyPI configuration file
 .pypirc
 
-experiments/
+*.npz
