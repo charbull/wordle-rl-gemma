@@ -1,8 +1,8 @@
 
 from pathlib import Path
 import argparse
-from src.utils.logging import plot_cumulative_wins, plot_comparison_chart
-
+from src.utils.logging import plot_cumulative_wins, plot_comparison_chart, plot_cumulative_wins_sxs, plot_win_distribution_sxs
+import matplotlib.pyplot as plt
 
 
 if __name__ == '__main__':

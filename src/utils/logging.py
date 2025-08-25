@@ -9,7 +9,7 @@ from torch.utils.tensorboard import SummaryWriter
 import json
 import matplotlib.pyplot as plt
 import pandas as pd
-
+from collections import Counter
 
 def plot_training_curves(
     timestamp: str,
@@ -52,8 +52,7 @@ def plot_comparison_chart(jsonl_path: str):
     
     """
     # --- Process and Print Final Results ---
-    with open(jsonl_path, 'r') as f:
-        all_results = [json.loads(line) for line in f]
+    all_results = read_metrics_file(jsonl_path)
     results_df = pd.DataFrame(all_results)
     
     # Use 'log_type' to group data by model
@@ -112,6 +111,11 @@ def plot_comparison_chart(jsonl_path: str):
     plt.savefig(plot_filename)
     print(f"\n📈 Comparison plot saved to '{plot_filename}'")
     plt.show()
+
+def read_metrics_file(jsonl_path):
+    with open(jsonl_path, 'r') as f:
+        all_results = [json.loads(line) for line in f]
+    return all_results
 
 def plot_cumulative_wins(metrics_file: Path):
     """
@@ -300,3 +304,102 @@ def truncate_jsonl_log(log_file: Path, max_step: int):
                 print(f"Warning: Skipping malformed line in log: {line.strip()}")
 
     print(f"Successfully truncated log file. Kept {records_kept_count} records up to step {max_step}.")
+
+
+
+def plot_cumulative_wins_sxs(metrics_file_path: str):
+    """
+    Generates a step chart showing cumulative wins over game steps.
+    """
+    if not metrics_file_path:
+        print("No logs to process.")
+        return
+
+    log_list = read_metrics_file(metrics_file_path)
+
+    # Sort logs by step to ensure correct order
+    log_list.sort(key=lambda x: x['step'])
+    steps = sorted(list(set(log['step'] for log in log_list)))
+    
+    base_wins_over_time = []
+    lora_wins_over_time = []
+    
+    base_win_count = 0
+    lora_win_count = 0
+    
+    for step in steps:
+        for log in log_list:
+            if log['step'] == step:
+                if log['solved']:
+                    if log['log_type'] == 'Base Model':
+                        base_win_count += 1
+                    elif log['log_type'] == 'LoRA Model':
+                        lora_win_count += 1
+        base_wins_over_time.append(base_win_count)
+        lora_wins_over_time.append(lora_win_count)
+
+    plt.figure(figsize=(12, 7))
+    plt.step(steps, base_wins_over_time, where='post', label='Base Model Wins', color='cornflowerblue', linewidth=2)
+    plt.step(steps, lora_wins_over_time, where='post', label='LoRA Model Wins', color='salmon', linewidth=2)
+    
+    title_text = f'Cumulative Wordle Wins (Total Games Played: {len(steps)})'
+    plt.title(title_text, fontsize=16)
+
+    plt.xlabel('Game Step', fontsize=12)
+    plt.ylabel('Total Cumulative Wins', fontsize=12)
+    plt.legend()
+    plt.grid(True, which='both', linestyle='--', linewidth=0.5)
+    plt.tight_layout()
+    max_wins = max(base_win_count, lora_win_count)
+    if max_wins > 0:
+        plt.yticks(range(0, max_wins + 2))
+
+    output_path = Path(metrics_file_path).parent / f"cumulative_wins_sxs_lora_base_{len(steps)}_games.png"
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    print(f"Chart saved to {output_path}")
+
+
+def plot_win_distribution_sxs(metrics_file_path: str):
+    """
+    Generates a bar chart showing the distribution of wins by number of turns.
+    """
+
+    log_list = read_metrics_file(metrics_file_path)
+
+    base_turns = [log['turns_to_solve'] for log in log_list if log['log_type'] == 'Base Model' and log['solved']]
+    lora_turns = [log['turns_to_solve'] for log in log_list if log['log_type'] == 'LoRA Model' and log['solved']]
+
+    if not base_turns and not lora_turns:
+        print("No wins recorded, skipping distribution chart.")
+        return
+
+    base_counts = Counter(base_turns)
+    lora_counts = Counter(lora_turns)
+    
+    labels = sorted(list(set(base_counts.keys()) | set(lora_counts.keys())))
+    
+    base_values = [base_counts.get(turn, 0) for turn in labels]
+    lora_values = [lora_counts.get(turn, 0) for turn in labels]
+    steps = sorted(list(set(log['step'] for log in log_list)))
+    x = np.arange(len(labels))  # the label locations
+    width = 0.35  # the width of the bars
+
+    fig, ax = plt.subplots(figsize=(12, 7))
+    rects1 = ax.bar(x - width/2, base_values, width, label='Base Model', color='cornflowerblue')
+    rects2 = ax.bar(x + width/2, lora_values, width, label='LoRA Model', color='salmon')
+
+    ax.set_ylabel('Number of Wins', fontsize=12)
+    ax.set_xlabel('Turns to Solve', fontsize=12)
+    ax.set_title(f'Distribution of Wins by Number of Turns (Total Games Played {len(steps)})', fontsize=16)
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels)
+    ax.legend()
+    
+    ax.bar_label(rects1, padding=3)
+    ax.bar_label(rects2, padding=3)
+    
+    fig.tight_layout()
+
+    output_path = Path(metrics_file_path).parent / f"win_distribution_sxs_lora_base_{len(steps)}_games.png"
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    print(f"Chart saved to {output_path}")

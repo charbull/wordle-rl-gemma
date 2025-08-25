@@ -5,12 +5,12 @@ from mlx_lm import load
 from mlx_lm.sample_utils import make_sampler
 from pathlib import Path
 from tqdm import tqdm
-from src.utils.logging import plot_comparison_chart, write_metrics_to_file
+from src.utils.logging import plot_comparison_chart, write_metrics_to_file, plot_cumulative_wins_sxs, plot_win_distribution_sxs
 import src.utils.config as cfg
 import src.ml.lora as lora
 import src.wordle.prompt as prompt
 
-def play_side_by_side(training_config_path: str, lora_adapter_path, output_file: str, num_samples: int = 100, log_interval: int = 10, with_game_history: bool = True):
+def play_side_by_side(training_config_path: str, lora_adapter_path, metrics_file: str, num_samples: int = 100, log_interval: int = 10, with_game_history: bool = True):
     """ Play side by side LoRA vs Base model on a num_samples"""
     results_buffer: List[game.GameRecord] = []
     win_counts = {'Base Model': 0, 'LoRA Model': 0}
@@ -45,11 +45,15 @@ def play_side_by_side(training_config_path: str, lora_adapter_path, output_file:
     # --- 5. Run Side-by-Side Evaluation ---
     print("\nStarting side-by-side evaluation...")
     # Create the deterministic sampler for evaluation
-    eval_sampler = make_sampler(temp=0.9)
+    eval_sampler = make_sampler(temp=0.1)
     
+    # Use the .select() method to create a view of the first `num_samples` rows.
+    # This is very fast and does not load all the data into RAM.
+    subset_dataset = test_dataset.select(range(num_samples))
+
     # --- 2. Run Side-by-Side Evaluation ---
     # Get a handle on the tqdm object to update it dynamically.
-    pbar = tqdm(enumerate(test_dataset[:num_samples]), total=num_samples, desc="Playing Wordle Games")
+    pbar = tqdm(enumerate(subset_dataset), total=num_samples, desc="Playing Wordle Games")
     for i, sample in pbar:
         secret_word = sample['secret']
         print(f"  -> Playing game: (Secret: {secret_word.upper()})")
@@ -83,15 +87,19 @@ def play_side_by_side(training_config_path: str, lora_adapter_path, output_file:
         pbar.set_postfix_str(f"Wins -> Base: {win_counts['Base Model']}, LoRA: {win_counts['LoRA Model']}")
 
         if (i + 1) % log_interval == 0:
-            write_metrics_to_file(results_buffer, output_file)
+            write_metrics_to_file(results_buffer, metrics_file)
             results_buffer.clear()
 
     if results_buffer:
-        write_metrics_to_file(results_buffer, output_file)
+        write_metrics_to_file(results_buffer, metrics_file)
         results_buffer.clear()
         
-    print(f"\n📊 Detailed results saved to '{output_file}'")
-    plot_comparison_chart(output_file)
+    print(f"\n📊 Detailed results saved to '{metrics_file}'")
+    plot_comparison_chart(metrics_file)
+    plot_cumulative_wins_sxs(metrics_file)
+    
+    # Generate and show the second chart
+    plot_win_distribution_sxs(metrics_file)
 
 
 if __name__ == "__main__":
@@ -103,5 +111,5 @@ if __name__ == "__main__":
     OUTPUT_DIR = Path(LORA_CONFIG_FILE_PATH).parent / "plots"
     eval_timestamp = time.strftime("%Y%m%d-%H%M%S")
 
-    jsonl_path = OUTPUT_DIR / f"side_by_side_results_{eval_timestamp}_with_history.jsonl"
-    play_side_by_side(training_config_path=LORA_CONFIG_FILE_PATH, lora_adapter_path=LORA_ADAPTER_PATH, output_file=jsonl_path, num_samples=NUM_SAMPLES, log_interval=LOG_INTERVAL, with_game_history=True)
+    jsonl_path = OUTPUT_DIR / f"side_by_side_results_{eval_timestamp}_without_history.jsonl"
+    play_side_by_side(training_config_path=LORA_CONFIG_FILE_PATH, lora_adapter_path=LORA_ADAPTER_PATH, metrics_file=jsonl_path, num_samples=NUM_SAMPLES, log_interval=LOG_INTERVAL, with_game_history=False)
