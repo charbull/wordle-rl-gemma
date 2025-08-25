@@ -129,7 +129,7 @@ GRPO Training Steps:   4%|████████▌                           
 
 * when Chose from Allowed words in the dictionary, there is more words than the 2900 list of answers that the model was trained on.
 * during training and sampling evaluation, the eval data had a random (0, 4) history turns where we picked carefully logical attempts that brings the model closer to the solution.
-
+* The evaluation had also N generations.
 
 ### Method 1: Full Game Simulation (Starting from Turn Zero)
 

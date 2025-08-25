@@ -186,7 +186,7 @@ def plot_cumulative_wins(metrics_file: Path):
 
     # --- 4. Save the plot ---
     input_filename_stem = metrics_file.stem 
-    plot_filename = metrics_file.parent / f"cumulative_wins_train_vs_eval_{input_filename_stem}.png"
+    plot_filename = metrics_file.parent / f"plots/cumulative_wins_train_vs_eval_{input_filename_stem}.png"
     plt.savefig(plot_filename)
     
     print(f"Successfully generated and saved plot to '{plot_filename}'")
