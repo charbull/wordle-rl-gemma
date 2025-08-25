@@ -309,6 +309,7 @@ wordle play: guess 'STILT' against secret 'STILL', generated feedback is 'G G G 
 
 ### without history
 
+on temp 0.1 opening word is ADMIX for LoRA, versus ADIEU for the base model, lets look at the enthropy
 
 
 
