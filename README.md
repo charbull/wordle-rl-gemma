@@ -125,10 +125,69 @@ GRPO Training Steps:   4%|████████▌                           
 
 * implement a cosine learning rate
 
-### Evaluation
+## Evaluation
 
 * when Chose from Allowed words in the dictionary, there is more words than the 2900 list of answers that the model was trained on.
 * during training and sampling evaluation, the eval data had a random (0, 4) history turns where we picked carefully logical attempts that brings the model closer to the solution.
+
+
+### Method 1: Full Game Simulation (Starting from Turn Zero)
+
+This is the **gold standard** and should be your primary method for comparing the base model vs. the fine-tuned model.
+
+**What it tests:**
+*   **End-to-end performance:** Can the model play a complete, successful game?
+*   **Strategic quality:** Does it use a good opening word? Does its strategy evolve correctly as it gets more clues?
+*   **Efficiency:** How many turns does it take to win on average?
+*   **Resilience:** Can it recover from a suboptimal early guess?
+
+**How to implement it:**
+You need to create a simulation loop:
+1.  Pick a secret word (from a non-contaminated list).
+2.  **Turn 0:** Give the model the empty "Current Knowledge" prompt.
+3.  Parse the model's `<guess>`.
+4.  Check if the guess is the secret word. If so, record the win and the turn count.
+5.  If not, generate the Green, Yellow, and Gray clues based on the guess.
+6.  **Next Turn:** Create a new prompt with the updated "Current Knowledge" (including the new clues and the new list of "Words Already Guessed").
+7.  Repeat until the model wins or runs out of its 6 attempts.
+8.  Run this simulation over a large set of secret words (e.g., 100-1000) for both the base and fine-tuned models.
+
+**Key Metrics to Compare:**
+*   **Success Rate:** What percentage of games did each model win?
+*   **Average Guesses to Solve:** For the games it won, what was the average number of turns?
+*   **Guess Distribution:** A chart showing how many games were won in 2, 3, 4, 5, or 6 turns.
+*   **Failure Rate / Invalid Guess Rate:** How often did the model make an invalid guess (e.g., re-using a gray letter)?
+
+---
+
+### Method 2: Mid-Game "Snapshot" Scenarios
+
+This is exactly what you provided in your example. This method is excellent for **diagnosing specific reasoning abilities**.
+
+**What it tests:**
+*   **Logical Deduction:** Can the model correctly process a complex set of existing constraints?
+*   **Rule Adherence:** Given a difficult state, does the model still perfectly follow the rules?
+*   **Problem Solving:** Can it find the one correct word when the possibilities have been narrowed significantly?
+
+**How to implement it:**
+1.  Create a dataset of challenging, non-contaminated mid-game states (like the `CRAMP` example). These are your "unit tests."
+2.  For each scenario, you feed the prompt to the model and evaluate its single response.
+3.  You check if the model's guess is a valid word that satisfies all the given constraints.
+
+**Key Metrics to Compare:**
+*   **Snapshot Accuracy:** What percentage of these specific scenarios did the model solve correctly in one guess?
+
+---
+
+### Final Recommendation and Strategy
+
+1.  **Use Full Game Simulation (Method 1) as your main evaluation.** This is the truest measure of which model is a better Wordle player. Your primary conclusion ("My fine-tuned model is X% better than the base model") should come from these results.
+
+2.  **Use Mid-Game Scenarios (Method 2) as a diagnostic tool.** If you find that your fine-tuned model's success rate in the full game isn't as high as you'd like, you can use these snapshots to figure out *why*. Is it failing in situations with many yellow letters? Does it get confused when the green letters form a tricky pattern? This helps you understand its specific weaknesses.
+
+So, to answer your question directly: **Do not *just* give the model a zero turn.** Run a full simulation starting from a zero turn. And **separately**, use your test data of mid-game scenarios to get a more granular look at its logical reasoning capabilities.
+
+And for both methods, remember to set the **temperature to 0.0 or 0.1** to ensure your results are deterministic and purely a measure of skill.
 
 
 ## Design choices

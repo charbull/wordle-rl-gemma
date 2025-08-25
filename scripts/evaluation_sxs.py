@@ -25,17 +25,13 @@ if __name__ == "__main__":
     results_buffer: List[game.GameRecord] = []
     win_counts = {'Base Model': 0, 'LoRA Model': 0}
     
-    
-    print(f"Selected a random sample of {NUM_SAMPLES} words for side-by-side evaluation.")
-
-
     training_config = cfg.load_config_from_file(LORA_CONFIG_FILE_PATH)
     training_config.rl.sampling_temperature = 0.0  # Deterministic sampling for evaluation
     training_config.rl.num_generations = 1  # Single generation per prompt
-    # get the same split and use the test set
+    # get the same split used in training and use the test set to make sure there is no data contamination
     _, _, test_dataset = game.prepare_data(config=training_config)
 
-
+    print(f"Selected a random sample of {NUM_SAMPLES} words for side-by-side evaluation from the test dataset of {len(test_dataset)} samples.")
 
     # --- 2. Prepare the LoRA Model ---
     print("\nLoading and preparing the LoRA-finetuned model...")
@@ -59,7 +55,7 @@ if __name__ == "__main__":
     # --- 5. Run Side-by-Side Evaluation (as before) ---
     print("\nStarting side-by-side evaluation...")
     # Create the deterministic sampler for evaluation
-    eval_sampler = make_sampler(temp=0.0)
+    eval_sampler = make_sampler(temp=0.9)
     
     # --- 2. Run Side-by-Side Evaluation ---
     total_words = len(test_dataset)
