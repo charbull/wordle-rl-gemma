@@ -1,15 +1,21 @@
 from dataclasses import dataclass, field
 from typing import List
-from src.utils.constants import ALLOWED_GUESSES, FIVE_LETTER_WORD_RE, GUESS_TAG_RE
 import re
 from collections import Counter
 from mlx_lm import generate
-from src.utils import config as cfg
 from typing import Callable, Dict, Optional
 import json
 from datasets import Dataset
 from functools import partial
-
+from typing import List
+from mlx_lm import load
+from mlx_lm.sample_utils import make_sampler
+from tqdm import tqdm
+from src.utils import config as cfg
+from src.utils.constants import ALLOWED_GUESSES, FIVE_LETTER_WORD_RE, GUESS_TAG_RE
+from src.utils.logging import plot_comparison_chart, write_metrics_to_file
+import src.ml.lora as lora
+import src.wordle.prompt as prompt
 # ==============================================================================
 # ---  DATA STRUCTURES FOR GAME LOGIC ---
 # ==============================================================================
@@ -622,3 +628,74 @@ def play_eval_game(
         final_reward=-1.0,
         loss_at_step=-1.0
     )
+
+
+def play_side_by_side(training_config_path: str, lora_adapter_path, output_file: str, num_samples: int = 100, log_interval: int = 10):
+    """ Play side by side LoRA vs Base model on a num_samples"""
+    results_buffer: List[GameRecord] = []
+    win_counts = {'Base Model': 0, 'LoRA Model': 0}
+    
+    training_config = cfg.load_config_from_file(training_config_path)
+    training_config.rl.sampling_temperature = 0.0  # Deterministic sampling for evaluation
+    training_config.rl.num_generations = 1  # Single generation per prompt
+    # get the same split used in training and use the test set to make sure there is no data contamination
+    _, _, test_dataset = prepare_data(config=training_config)
+
+    print(f"Selected a random sample of {num_samples} words for side-by-side evaluation from the test dataset of {len(test_dataset)} samples.")
+
+    # --- 2. Prepare the LoRA Model ---
+    print("\nLoading and preparing the LoRA-finetuned model...")
+    lora_foundation_model, tokenizer = load(training_config.model.name)
+    lora_config = {"rank": training_config.lora.rank, "alpha": training_config.lora.alpha, "dropout": training_config.lora.dropout}
+    
+    lora_model_with_layers = lora.apply_lora_to_model(
+        model=lora_foundation_model, 
+        lora_config=lora_config, 
+        layers_to_tune=training_config.lora.layers_to_tune
+    )
+    lora_model = lora.load_adapter(model=lora_model_with_layers, adapter_path=lora_adapter_path)
+    
+    # --- 3. Load a SEPARATE, CLEAN Base Model for Comparison ---
+    print("\nLoading a clean base model for comparison...")
+    base_model, _ = load(training_config.model.name)
+    
+    # --- 4. Run the Verification Check ---
+    lora.verify_lora_loading(base_model, lora_model)
+    
+    # --- 5. Run Side-by-Side Evaluation (as before) ---
+    print("\nStarting side-by-side evaluation...")
+    # Create the deterministic sampler for evaluation
+    eval_sampler = make_sampler(temp=0.9)
+    
+    # --- 2. Run Side-by-Side Evaluation ---
+    # Get a handle on the tqdm object to update it dynamically.
+    pbar = tqdm(enumerate(test_dataset), total=num_samples, desc="Playing Wordle Games")
+    for i, sample in pbar:
+        secret_word = sample['secret']
+        print(f"  -> Playing game: (Secret: {secret_word.upper()})")
+        
+        print_debug = (i % 10 == 0)
+        print(f"  -> Base model playing...")
+        base_record = play_eval_game(base_model, tokenizer, secret_word, prompt.SYSTEM_PROMPT, training_config, eval_sampler, 'Base Model', i, print_debug)
+        results_buffer.append(base_record)
+        if base_record.solved:
+            win_counts['Base Model'] += 1
+        
+        print(f"  -> LoRA model playing...")
+        lora_record = play_eval_game(lora_model, tokenizer, secret_word, prompt.SYSTEM_PROMPT, training_config, eval_sampler, 'LoRA Model', i, print_debug)      
+        results_buffer.append(lora_record)
+        if lora_record.solved:
+            win_counts['LoRA Model'] += 1
+
+        pbar.set_postfix_str(f"Wins -> Base: {win_counts['Base Model']}, LoRA: {win_counts['LoRA Model']}")
+
+        if (i + 1) % log_interval == 0:
+            write_metrics_to_file(results_buffer, output_file)
+            results_buffer.clear()
+
+    if results_buffer:
+        write_metrics_to_file(results_buffer, output_file)
+        results_buffer.clear()
+        
+    print(f"\n📊 Detailed results saved to '{output_file}'")
+    plot_comparison_chart(output_file)
