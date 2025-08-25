@@ -96,10 +96,10 @@ def play_side_by_side(training_config_path: str, lora_adapter_path, metrics_file
         
     print(f"\n📊 Detailed results saved to '{metrics_file}'")
     plot_comparison_chart(metrics_file)
+
     plot_cumulative_wins_sxs(metrics_file)
-    
-    # Generate and show the second chart
     plot_win_distribution_sxs(metrics_file)
+
 
 
 if __name__ == "__main__":

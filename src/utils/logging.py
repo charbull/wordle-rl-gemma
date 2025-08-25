@@ -357,6 +357,7 @@ def plot_cumulative_wins_sxs(metrics_file_path: str):
     output_path = Path(metrics_file_path).parent / f"cumulative_wins_sxs_lora_base_{len(steps)}_games.png"
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     print(f"Chart saved to {output_path}")
+    plt.show()
 
 
 def plot_win_distribution_sxs(metrics_file_path: str):
@@ -403,3 +404,4 @@ def plot_win_distribution_sxs(metrics_file_path: str):
     output_path = Path(metrics_file_path).parent / f"win_distribution_sxs_lora_base_{len(steps)}_games.png"
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     print(f"Chart saved to {output_path}")
+    plt.show()
