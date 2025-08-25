@@ -352,7 +352,7 @@ def plot_cumulative_wins_sxs(metrics_file_path: str):
     plt.tight_layout()
     max_wins = max(base_win_count, lora_win_count)
     if max_wins > 0:
-        plt.yticks(range(0, max_wins + 2))
+        plt.yticks(range(0, max_wins + 5, 5))
 
     output_path = Path(metrics_file_path).parent / f"cumulative_wins_sxs_lora_base_{len(steps)}_games.png"
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
