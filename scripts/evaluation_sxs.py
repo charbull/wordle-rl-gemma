@@ -111,5 +111,5 @@ if __name__ == "__main__":
     OUTPUT_DIR = Path(LORA_CONFIG_FILE_PATH).parent / "plots"
     eval_timestamp = time.strftime("%Y%m%d-%H%M%S")
 
-    jsonl_path = OUTPUT_DIR / f"side_by_side_results_{eval_timestamp}_without_history.jsonl"
-    play_side_by_side(training_config_path=LORA_CONFIG_FILE_PATH, lora_adapter_path=LORA_ADAPTER_PATH, metrics_file=jsonl_path, num_samples=NUM_SAMPLES, log_interval=LOG_INTERVAL, with_game_history=False)
+    jsonl_path = OUTPUT_DIR / f"side_by_side_results_{eval_timestamp}_with_history_temp01.jsonl"
+    play_side_by_side(training_config_path=LORA_CONFIG_FILE_PATH, lora_adapter_path=LORA_ADAPTER_PATH, metrics_file=jsonl_path, num_samples=NUM_SAMPLES, log_interval=LOG_INTERVAL, with_game_history=True)

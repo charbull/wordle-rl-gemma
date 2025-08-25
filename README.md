@@ -266,8 +266,10 @@ An early experiment with a 1B parameter model on a different task revealed a pot
 Training a specialized RL agent is an iterative, holistic process. The journey from a 0% to a ~30% win rate was not a single optimization but a series of fixes and improvements across the entire stack: from robust testing and clean data pipelines to nuanced prompt engineering, careful hardware monitoring, and a deep understanding of the reward landscape. Each failure provided the necessary data to build a more robust and intelligent final system.
 
 
-### Interesting logs
+## Interesting logs
 
+
+### Trying new letters
   -> LoRA model playing...
 
 wordle play: guess 'CORNE' against secret 'BORNE', generated feedback is 'X G G G G'
@@ -277,3 +279,29 @@ wordle play: guess 'FORNE' against secret 'BORNE', generated feedback is 'X G G 
 wordle play: guess 'DORNE' against secret 'BORNE', generated feedback is 'X G G G G'
 
 wordle play: guess 'LORNE' against secret 'BORNE', generated feedback is 'X G G G G'
+
+### With history:
+
+===================================
+|| NEW GAME || Secret Word: STILL
+===================================
+--- Starting from a history of 3 turn(s) ---
+
+--- Turn 4/6 ---
+Prompt sent to model:
+You are playing a game of Wordle. Analyze the clues and provide your next guess.
+**Current Knowledge:**
+*   **Correct Position (Green):** `S _ _ L _`
+*   **Wrong Position (Yellow):** 'T' (at least 1)
+*   **Not in Word (Gray):** A, C, E, O, P, R, U, Y
+*   **Words Already Guessed:** CAPUT, SOARE, SLYLY
+
+Your task is to find a valid 5-letter English word that fits all the clues above.
+Provide your reasoning within <think> tags, and then your final guess within <guess> tags.
+  [Generation 1/1]
+    Raw Response: "<guess>STILT</guess>"
+    Parsed Guess: 'STILT'
+
+wordle play: guess 'STILT' against secret 'STILL', generated feedback is 'G G G G X'
+
+### without history
