@@ -39,7 +39,7 @@ python -m scripts.data_synth --mode rl
 ## Empty your RAM
 
 ```sh
-sudo pruge
+sudo purge
 ```
 
 ## Run training
@@ -69,6 +69,9 @@ To run one test:
 python -m unittest tests.test_cot_wordle_data_generator
 ```
 
+## Run from a trained model already
+
+charbull/mlx_gemma3_4b_wordle_lora
 
 # Lessons learned notes:
 
