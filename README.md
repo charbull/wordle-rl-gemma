@@ -264,3 +264,16 @@ An early experiment with a 1B parameter model on a different task revealed a pot
 #### **Final Conclusion**
 
 Training a specialized RL agent is an iterative, holistic process. The journey from a 0% to a ~30% win rate was not a single optimization but a series of fixes and improvements across the entire stack: from robust testing and clean data pipelines to nuanced prompt engineering, careful hardware monitoring, and a deep understanding of the reward landscape. Each failure provided the necessary data to build a more robust and intelligent final system.
+
+
+### Interesting logs
+
+  -> LoRA model playing...
+
+wordle play: guess 'CORNE' against secret 'BORNE', generated feedback is 'X G G G G'
+
+wordle play: guess 'FORNE' against secret 'BORNE', generated feedback is 'X G G G G'
+
+wordle play: guess 'DORNE' against secret 'BORNE', generated feedback is 'X G G G G'
+
+wordle play: guess 'LORNE' against secret 'BORNE', generated feedback is 'X G G G G'

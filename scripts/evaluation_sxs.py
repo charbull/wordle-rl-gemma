@@ -49,7 +49,7 @@ def play_side_by_side(training_config_path: str, lora_adapter_path, output_file:
     
     # --- 2. Run Side-by-Side Evaluation ---
     # Get a handle on the tqdm object to update it dynamically.
-    pbar = tqdm(enumerate(test_dataset), total=num_samples, desc="Playing Wordle Games")
+    pbar = tqdm(enumerate(test_dataset[:num_samples]), total=num_samples, desc="Playing Wordle Games")
     for i, sample in pbar:
         secret_word = sample['secret']
         print(f"  -> Playing game: (Secret: {secret_word.upper()})")
@@ -98,7 +98,7 @@ if __name__ == "__main__":
     LORA_CONFIG_FILE_PATH = "/Users/charbelk/dev/wordle-rl-gemma/experiments/20250824-133827_gemma-3-4b-it-bf16_rank64/grpo_lora_config.json"
     LORA_ADAPTER_PATH = "/Users/charbelk/dev/wordle-rl-gemma/experiments/20250824-133827_gemma-3-4b-it-bf16_rank64/adapters/adapter_step_500.npz"
 
-    NUM_SAMPLES = 100
+    NUM_SAMPLES = 150
     LOG_INTERVAL = 10
     OUTPUT_DIR = Path(LORA_CONFIG_FILE_PATH).parent / "plots"
     eval_timestamp = time.strftime("%Y%m%d-%H%M%S")
