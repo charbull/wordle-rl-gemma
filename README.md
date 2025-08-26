@@ -367,3 +367,99 @@ These are "soft" penalties designed to refine the agent's behavior, encouraging 
 *   **Response Length Penalty (`length_penalty_per_token`):** A minor penalty is applied based on the total number of tokens in the model's generated response (including its reasoning). This encourages concise output.
 
 By combining these elements, the reward strategy guides the agent to become a proficient Wordle player that respects the rules, employs intelligent information-gathering tactics, and aims to solve the puzzle efficiently.
+
+## What to explore next?
+
+
+### Category 1: Low-Hanging Fruit (Easiest to Implement)
+
+These are changes you can make in your configuration file and immediately see an impact.
+
+#### 1. Train for Longer
+Your training curves, especially the "Eval Win Rate (%)", show a steady upward trend that has **not yet plateaued** at 500 steps. This is the clearest sign that the model is still learning.
+*   **Action:** Increase `iterations` in your config from 500 to **1500 or 2000**.
+*   **Why:** You might simply be stopping the training too early, before the model has fully converged. Monitor the validation win rate, and stop when it flattens out for a significant number of steps (your early stopping logic will handle this).
+
+#### 2. Increase LoRA Capacity
+Wordle has a complex strategic space. A higher-capacity adapter might be able to capture more of this nuance.
+*   **Action:** Increase the LoRA `rank` from 64 to **128** or even **256**. Remember to also increase `alpha` to maintain the ratio (e.g., `alpha: 256` for `rank: 128`).
+*   **Why:** A higher rank gives the model more trainable parameters to learn the task, which can lead to a higher performance ceiling. The trade-off is slightly longer training times.
+
+---
+
+### Category 2: Reward Function Tuning (Highest Potential Impact)
+
+The reward function is the "soul" of your RL agent. Small, targeted changes here can have massive effects on the learned strategy. Your current function is great, but here's how to make it even smarter.
+
+#### 1. Implement a "Hard Mode" Penalty
+One of the biggest mistakes a Wordle player can make is not using known clues. You can explicitly penalize this.
+*   **Action:** In `calculate_total_reward`, after you have calculated `known_green` and `known_yellow`, check if the new `guess` violates "Hard Mode" rules.
+    ```python
+    # In calculate_total_reward, after calculating known_green/yellow/gray
+    hard_mode_penalty = 0.0
+    # Check if all known yellow letters are present in the guess
+    for letter in known_yellow:
+        if letter not in guess:
+            hard_mode_penalty += config.reward.get("missing_yellow_penalty", 30.0) # Add this to config
+    
+    # Check if all known green letters are in their correct spots (your green_violations check already does this)
+    # total_penalty += hard_mode_penalty
+    ```
+*   **Why:** This forces the model to learn the most critical part of deductive reasoning: narrowing down the search space. It stops the model from making "exploratory" guesses in later turns when it should be exploiting known information.
+
+#### 2. Add a "Certainty" or "Knockout" Bonus
+When the model correctly deduces that only one possible word remains, it should be heavily rewarded for guessing it.
+*   **Action:** In `calculate_total_reward`, before scoring a valid guess, check the number of remaining possibilities.
+    ```python
+    # In calculate_total_reward, inside the main logic for a valid guess
+    clues_before = get_clue_summary([f.guess for f in past_feedback], [f.feedback for f in past_feedback])
+    possibilities_before = find_valid_completions(clues_before, constants.ANSWERS_WORDS)
+    
+    certainty_bonus = 0.0
+    if len(possibilities_before) == 1 and guess == possibilities_before[0]:
+        certainty_bonus = config.reward.get("certainty_bonus", 50.0) # Add to config
+    
+    # Add this bonus to the potential_score
+    potential_score += certainty_bonus
+    ```
+*   **Why:** This specifically rewards the "endgame" logic, reinforcing the model's ability to finish the puzzle once the constraints become very tight.
+
+---
+
+### Category 3: Advanced Training & Algorithm Tweaks
+
+These involve more changes to your training loop but can lead to significant stability and performance gains.
+
+#### 1. Periodically Update the Reference Model
+In your current `grpo_loss_and_grad`, the `ref_model` is frozen from the start. As the `policy_model` gets better, it can diverge significantly, which can sometimes make training unstable.
+*   **Action:** Modify your training loop to periodically update the weights of `ref_model` with a recent version of `policy_model`.
+    ```python
+    # In the main train() loop
+    if step_counter % config.grpo.ref_update_steps == 0: # Add ref_update_steps to config, e.g., 100
+        print(f"\n--- Updating reference model at step {step_counter} ---")
+        # Get the latest trained LoRA parameters
+        latest_params = dict(tree_flatten(policy_model.parameters()))
+        # Update the ref_model's weights (it will still be frozen for the loss calculation)
+        ref_model.update(tree_unflatten(list(latest_params.items())))
+        mx.eval(ref_model.parameters())
+    ```
+*   **Why:** This keeps the KL-divergence manageable and ensures the GRPO loss is comparing the policy against a more relevant, capable baseline. It can prevent the policy from "forgetting" the base model's capabilities while it learns the new task.
+
+#### 2. Increase `num_generations` in the RL Config
+Your GRPO loss learns from preference pairs (winner vs. loser). More pairs give it a better signal.
+*   **Action:** In your config, increase `rl.num_generations` from 2 to **4**.
+*   **Why:** Generating 4 responses per turn creates up to 3 preference pairs (`(winner, loser1)`, `(winner, loser2)`, `(winner, loser3)`) instead of just one. This provides a much richer and more stable gradient signal for each training step. The trade-off is that each step will take longer.
+
+---
+
+### Category 4: Data and Inference Strategy
+
+#### 1. Curate Data to Focus on "Hard" Games
+Your model might be good at games that are solvable in 3-4 turns but struggle with harder ones.
+*   **Action:** Analyze your dataset and create a training split that oversamples "hard" trajectories (e.g., those that originally took 5-6 turns to solve).
+*   **Why:** This forces the model to train more on the scenarios where it's currently weakest, improving its resilience.
+
+#### 2. Use Self-Consistency at Inference Time
+You can improve your evaluation win rate *without retraining* by changing how you generate guesses.
+*   **Action:** During evaluation (`play_eval_game`), instead of generating one guess at `temp=0.0`, generate 5 parallel guesses at a low temperature (e.g., `temp=0.2`). Then, choose the guess that appears most frequently (a majority vote).
+*   **Why:** This technique, called self-consistency, averages out random generation errors and is known to significantly boost performance on reasoning tasks. The model's most common "reasoned" path is often the correct one.
