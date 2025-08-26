@@ -18,8 +18,8 @@
         "use_early_stopping": true
     },
     "lora": {
-         "rank": 64,             
-        "alpha": 128.0,         
+         "rank": 128,             
+        "alpha": 32.0,         
         "dropout": 0.05,        
         "layers_to_tune": 33
     },
@@ -28,8 +28,8 @@
         "samples": 25
     },
     "rl": {
-        "num_generations": 2,
-        "max_completion_length": 512,
+        "num_generations": 4,
+        "max_completion_length": 128,
         "sampling_temperature": 0.9,
         "max_trials": 6
     },

@@ -279,13 +279,13 @@ def verify_lora_loading(base_model: nn.Module, lora_model: nn.Module) -> bool:
             print(f"Parameter '{name}' not found in LoRA model.")
             continue
 
-        if base_param.data.ne(lora_param.data).sum() == 0:
+        if mx.sum(base_param != lora_param).item() == 0:
             print(f"Parameter '{name}' is identical in both models (not adapted).")
         else:
             print(f"Parameter '{name}' differs between models (adapted).")
 
     for name, lora_param in lora_model.named_parameters():
-        if "lora" in name and lora_param.data.abs().sum() == 0:
+        if "lora" in name and mx.sum(mx.abs(lora_param)).item() == 0:
             print(f"Warning: LoRA-specific parameter '{name}' is all zeros.")
 
     print("LoRA adapter verification complete.")

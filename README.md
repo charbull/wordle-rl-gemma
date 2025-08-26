@@ -463,3 +463,22 @@ Your model might be good at games that are solvable in 3-4 turns but struggle wi
 You can improve your evaluation win rate *without retraining* by changing how you generate guesses.
 *   **Action:** During evaluation (`play_eval_game`), instead of generating one guess at `temp=0.0`, generate 5 parallel guesses at a low temperature (e.g., `temp=0.2`). Then, choose the guess that appears most frequently (a majority vote).
 *   **Why:** This technique, called self-consistency, averages out random generation errors and is known to significantly boost performance on reasoning tasks. The model's most common "reasoned" path is often the correct one.
+
+
+
+## Weakness of the model
+
+The "LoRA (History)" models show a dramatic improvement in performance, as expected when providing the model with the context of previous turns. The model with a lower temperature (Temp 0.1), which makes more deterministic choices, outperforms the one with a higher temperature (Temp 0.9), which is more random.
+### What this means for performance:
+
+*   **Good but not Perfect:** The model can still perform well because, after the first guess, it's quite good at using the constraints to narrow down the possibilities.
+*   **Vulnerable to Bad Starts:** If its default opening word happens to be a poor one for a specific puzzle (e.g., guessing `AUDIO` when the word is `SIGHT`), it starts with a significant disadvantage and may not be able to recover within the six-guess limit. This likely accounts for many of its losses.
+
+### How to fix this (as a next step):
+
+To reach the next level of performance, we would need to teach it that opening strategy. There are two common ways to do that:
+
+1.  **Fine-tune on Expert Data:** We could create a new dataset where every game transcript begins with a strategically optimal word. By training on this "expert" data, the model would learn to mimic this superior opening behavior.
+2.  **Hybrid Approach (Most Practical):** A simpler and very effective method would be to **hard-code the first guess** to always be an optimal word like `CRANE`, and then let the fine-tuned model take over for all subsequent turns. This guarantees a strong, information-rich start every single time.
+
+Your observation perfectly highlights the next logical step in improving this model's performance: teaching it not just how to play, but how to play *strategically* from the very first move.
