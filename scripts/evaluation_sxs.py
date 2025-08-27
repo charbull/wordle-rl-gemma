@@ -25,13 +25,10 @@ def play_side_by_side(training_config_path: str, lora_adapter_path, metrics_file
 
     # --- 2. Prepare the LoRA Model ---
     print("\nLoading and preparing the LoRA-finetuned model...")
-    lora_foundation_model, tokenizer = load(training_config.model.name)
-    lora_config = {"rank": training_config.lora.rank, "alpha": training_config.lora.alpha, "dropout": training_config.lora.dropout}
-    
+    lora_foundation_model, tokenizer = load(training_config.model.name)    
     lora_model_with_layers = lora.apply_lora_to_model(
         model=lora_foundation_model, 
-        lora_config=lora_config, 
-        layers_to_tune=training_config.lora.layers_to_tune
+        lora_config=training_config.lora
     )
     lora_model = lora.load_adapter(model=lora_model_with_layers, adapter_path=lora_adapter_path)
     

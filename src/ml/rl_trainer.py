@@ -369,8 +369,7 @@ def train(config: cfg.TrainerConfig, system_prompt: str):
     ref_model, _ = load(config.model.name)
 
     # Apply LoRA layers to the policy model, which will be trained.
-    lora_config = {"rank": config.lora.rank, "alpha": config.lora.alpha, "dropout": config.lora.dropout}
-    policy_model = lora.apply_lora_to_model(policy_model, lora_config, config.lora.layers_to_tune)
+    policy_model = lora.apply_lora_to_model(policy_model, config.lora)
     
     if config.training.resume_from_checkpoint:
         print(f"\n--- Resuming training, loading adapter: {config.training.resume_from_checkpoint} ---")

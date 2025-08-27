@@ -8,6 +8,7 @@ import mlx.optimizers as optim
 from mlx.utils import tree_flatten, tree_unflatten
 from mlx_lm import load
 from src.ml import lora
+from src.utils import config as cfg
 
 TEST_MODEL = "mlx-community/gemma-3-4b-it-bf16" 
 
@@ -34,8 +35,7 @@ class TestCheckpointResumeLogic(unittest.TestCase):
         Verifies the full cycle of training, saving, loading, and resuming,
         accounting for random weight initialization.
         """
-        lora_config = {"rank": 8, "alpha": 16, "dropout": 0.0}
-        layers_to_tune = 16
+        config = cfg.LoRAConfig(rank=8, alpha=16, dropout=0.0, layers_to_tune=16)
         
         with tempfile.TemporaryDirectory() as tmpdir:
             save_dir = Path(tmpdir)
@@ -43,7 +43,7 @@ class TestCheckpointResumeLogic(unittest.TestCase):
 
             print("\nStep 1: Setting up initial model...")
             model_to_train, _ = load(TEST_MODEL)
-            model_to_train = lora.apply_lora_to_model(model_to_train, lora_config, layers_to_tune)
+            model_to_train = lora.apply_lora_to_model(model_to_train, config)
             initial_lora_params = get_lora_params(model_to_train)
             self.assertTrue(len(initial_lora_params) > 0, "LoRA layers were not applied correctly.")
 
@@ -83,7 +83,7 @@ class TestCheckpointResumeLogic(unittest.TestCase):
 
             print("Step 5: Loading checkpoint into a new model...")
             model_to_resume, _ = load(TEST_MODEL)
-            model_to_resume = lora.apply_lora_to_model(model_to_resume, lora_config, layers_to_tune)
+            model_to_resume = lora.apply_lora_to_model(model_to_resume, config)
             
             model_to_resume = lora.load_adapter(model=model_to_resume, adapter_path=str(expected_checkpoint_path))
 

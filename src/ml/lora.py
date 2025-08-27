@@ -11,6 +11,10 @@ from mlx.utils import tree_flatten
 from mlx.utils import tree_flatten, tree_unflatten
 import json
 from mlx_lm import load
+import functools
+
+
+
 
 class LoRALinear(nn.Module):
     @staticmethod
@@ -138,31 +142,75 @@ def save_adapter(model: nn.Module, output_dir: str, lora_config: cfg.LoRAConfig,
 
     print(f"✅ Adapter successfully saved to {output_dir}")
 
-def apply_lora_to_model(model: nn.Module, lora_config: dict[str, Any], layers_to_tune: int)-> nn.Module:
+def find_transformer_layers(model: nn.Module) -> list:
+    """
+    Programmatically finds the list of transformer layers in a model,
+    handling different known architectures.
+
+    Args:
+        model (nn.Module): The model to inspect.
+
+    Returns:
+        list: The list of transformer layer modules.
+    
+    Raises:
+        ValueError: If no known layer path is found.
+    """
+    # List of potential paths to the transformer layers, ordered by preference
+    # or specificity.
+    potential_paths = [
+        "language_model.model.layers",  # For gemma-3-4b
+        "model.layers",                 # For gemma-1b, gemma-3-270m, and many others
+    ]
+
+    for path in potential_paths:
+        try:
+            # This uses a functional approach to safely access nested attributes.
+            # It's equivalent to model.language_model.model.layers
+            layers = functools.reduce(getattr, path.split('.'), model)
+            
+            # Check if we actually found a non-empty list of modules
+            if isinstance(layers, list) and len(layers) > 0 and isinstance(layers[0], nn.Module):
+                print(f"✅ Found transformer layers at path: 'model.{path}'")
+                return layers
+        except AttributeError:
+            # This path doesn't exist, so we'll just try the next one.
+            continue
+            
+    # If the loop finishes and we found nothing, raise a helpful error.
+    raise ValueError(
+        "Could not automatically find transformer layers in the model. "
+        "Please inspect the model architecture by printing it, and "
+        "add the correct path to the `potential_paths` list in the "
+        "`find_transformer_layers` function in lora.py."
+    )
+
+
+def apply_lora_to_model(model: nn.Module, lora_config: cfg.LoRAConfig)-> nn.Module:
     """ Applies LoRA structure to the model's layers.
     Note: the gemman models have different layer access patterns.
     Its important to print the model architecture to confirm the correct layers are being modified.
     Args:
         model (nn.Module): The base model to apply LoRA to.
-        lora_config (dict): A dictionary containing LoRA parameters: rank, alpha, dropout.
-        layers_to_tune (int): Number of layers to apply LoRA to.
+        lora_config: A config of LoRA parameters: rank, alpha, dropout.
     Returns:
         nn.Module: The model with LoRA layers applied.
     
     """
     # Freeze the model before applying LoRA
     model.freeze()
-    # print(model.language_model.model)
-    layers = model.language_model.model.layers # gemma 4b
-    # layers = model.model.layers # this is for gemma 1b
-    min_layers_to_tune = min(layers_to_tune, len(layers)) # gemma 4b
-    if min_layers_to_tune < layers_to_tune:
-        print(f"Warning: Trying to tune {layers_to_tune} layers, but model only has {len(model.model.layers)}. Tuning {min_layers_to_tune} layers instead.")
+    # print(model)
+    mlx_lora_config = {"rank": lora_config.rank, "alpha": lora_config.alpha, "dropout": lora_config.dropout}
+
+    layers = find_transformer_layers(model)
+    min_layers_to_tune = min(lora_config.layers_to_tune, len(layers)) # gemma 4b
+    if min_layers_to_tune < lora_config.layers_to_tune:
+        print(f"Warning: Trying to tune {lora_config.layers_to_tune} layers, but model only has {len(model.model.layers)}. Tuning {min_layers_to_tune} layers instead.")
     for l in layers[-min_layers_to_tune:]:
-        l.self_attn.q_proj = LoRALinear.from_linear(l.self_attn.q_proj, **lora_config)
-        l.self_attn.k_proj = LoRALinear.from_linear(l.self_attn.k_proj, **lora_config)
-        l.self_attn.v_proj = LoRALinear.from_linear(l.self_attn.v_proj, **lora_config)
-        l.self_attn.o_proj = LoRALinear.from_linear(l.self_attn.o_proj, **lora_config)
+        l.self_attn.q_proj = LoRALinear.from_linear(l.self_attn.q_proj, **mlx_lora_config)
+        l.self_attn.k_proj = LoRALinear.from_linear(l.self_attn.k_proj, **mlx_lora_config)
+        l.self_attn.v_proj = LoRALinear.from_linear(l.self_attn.v_proj, **mlx_lora_config)
+        l.self_attn.o_proj = LoRALinear.from_linear(l.self_attn.o_proj, **mlx_lora_config)
 
     trainable_params = sum(v.size for _, v in tree_flatten(model.trainable_parameters()))
     total_params = sum(v.size for _, v in tree_flatten(model.parameters()))
@@ -249,11 +297,9 @@ def load_adapter_with_model(training_config, adapter_path):
     
     base_model_name = training_config.model.name
     lora_config = training_config.lora
-    layers_to_tune = lora_config.layers_to_tune
 
     base_model, _ = load(base_model_name)
-    config = {"rank": lora_config.rank, "alpha": lora_config.alpha, "dropout": lora_config.dropout}
-    lora_adapter_with_base_model = apply_lora_to_model(base_model, config, layers_to_tune)
+    lora_adapter_with_base_model = apply_lora_to_model(base_model, lora_config)
     lora_adapter_with_base_model = load_adapter(lora_adapter_with_base_model, adapter_path)
 
     return lora_adapter_with_base_model

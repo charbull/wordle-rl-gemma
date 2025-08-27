@@ -7,7 +7,7 @@ from unittest.mock import patch, mock_open, MagicMock
 import json
 import os
 import tempfile
-
+from src.utils import config as cfg
 
 from src.ml.lora import (
     LoRALinear,
@@ -119,10 +119,8 @@ class TestLoRAUtilities(unittest.TestCase):
 
     def test_apply_lora_to_model(self):
         model = self.MockModel(num_layers=4)
-        lora_params = {"rank": 4, "alpha": 8, "dropout": 0.0}
-        layers_to_tune_int = 2
-        
-        tuned_model = apply_lora_to_model(model, lora_params, layers_to_tune=layers_to_tune_int)
+        config = cfg.LoRAConfig(rank=4, alpha=8, dropout=0.0, layers_to_tune=2)
+        tuned_model = apply_lora_to_model(model, config)
         
         self.assertIsInstance(tuned_model.language_model.model.layers[-1].self_attn.q_proj, LoRALinear)
         self.assertIsInstance(tuned_model.language_model.model.layers[-2].self_attn.q_proj, LoRALinear)
@@ -132,7 +130,8 @@ class TestLoRAUtilities(unittest.TestCase):
     def test_load_adapter(self):
         """Should correctly load adapter weights and update the model."""
         # 1. Define the LoRA parameters needed to create a model.
-        lora_params = {"rank": 4, "alpha": 8, "dropout": 0.0}
+        config = cfg.LoRAConfig(rank=4, alpha=8, dropout=0.0, layers_to_tune=1)
+
         
         # 2. Define a known set of adapter weights to save.
         # This dictionary represents the data we expect to load.
@@ -147,7 +146,7 @@ class TestLoRAUtilities(unittest.TestCase):
 
             # 4. Create a fresh model that will have the adapter loaded into it.
             fresh_model = self.MockModel(num_layers=1)
-            fresh_lora_model = apply_lora_to_model(fresh_model, lora_params, layers_to_tune=1)
+            fresh_lora_model = apply_lora_to_model(fresh_model, config)
             
             # 5. Sanity check: Ensure the weight is different *before* loading.
             original_weight = fresh_lora_model.language_model.model.layers[0].self_attn.q_proj.lora_a
