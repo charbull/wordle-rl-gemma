@@ -78,6 +78,7 @@ class TestTrainerResumeLogic(unittest.TestCase):
                     checkpoint_steps=25,
                     config_file=str(run_dir / "config.json"),
                     data_path=dummy_data_path,
+                    grad_clip_norm=1.0
                 ),
                 evaluation=cfg.EvalConfig(steps=eval_steps, samples=10),
                 model=cfg.ModelConfig(name="mock-model"),

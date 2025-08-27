@@ -16,7 +16,13 @@ class TrainingConfig:
     # The learning rate at the very end of training
     lr_min: float
     # Should match total `iterations`
-    lr_decay_steps: int  
+    lr_decay_steps: int
+    # This is a general-purpose technique used with optimizers.
+    # After the gradients are calculated, it checks their overall magnitude (their L2 norm). 
+    # If they are "exploding" (too large), it scales them down to a maximum value (e.g., `1.0`).
+    # This is a standard stabilization method for training any deep neural network 
+    # and is **not** specific to GSPO or GRPO.
+    grad_clip_norm: float
     batch_size: int
     log_steps: int
     checkpoint_steps: int
@@ -51,11 +57,20 @@ class RLConfig:
 
 @dataclass
 class GRPOConfig:
-    clip_epsilon: float = 0.2
+    clip_epsilon: float = 0.2 # This epsilon is for GRPO's token-level clipping
     ref_update_steps: int = 20
     kl_coeff: float = 0.02
     beta: float = 0.1
-    
+
+@dataclass
+class GSPOConfig:
+    # Epsilon for clipping the sequence-level importance ratio.
+    # The paper notes this is orders of magnitude smaller than GRPO's.
+    # A good starting point from the paper is 4e-4.
+    clip_epsilon: float = 0.0004
+    # Small value to add to the standard deviation denominator for numerical stability.
+    advantage_epsilon: float = 1e-8
+
 @dataclass
 class EvalConfig:
     steps: int
@@ -70,17 +85,21 @@ class TrainerConfig:
     # Optional fields with a default value of None
     rl: Optional[RLConfig] = None
     grpo: Optional[GRPOConfig] = None
+    gspo: Optional[GSPOConfig] = None
     reward: Optional[Dict[str, float]] = None
 
     @classmethod
     def from_dict(cls, config_dict: Dict) -> "TrainerConfig":
         rl = None
         grpo = None
+        gspo = None
         reward = None
         if "rl" in config_dict.keys():
             rl=RLConfig(**config_dict["rl"])
         if "grpo" in config_dict.keys():
             grpo=GRPOConfig(**config_dict["grpo"])
+        if "gspo" in config_dict.keys():
+            gspo=GSPOConfig(**config_dict["gspo"])
         if "reward" in config_dict.keys():
             reward = config_dict.get("reward", None)
 
@@ -90,6 +109,7 @@ class TrainerConfig:
             lora=LoRAConfig(**config_dict["lora"]),
             evaluation=EvalConfig(**config_dict["evaluation"]),
             grpo=grpo,
+            gspo=gspo,
             rl=rl,
             reward=reward
         )
