@@ -1,43 +1,39 @@
-# Project Description: Wordle-RL
+# Wordle-RL: Training a Language Model to Play Wordle with Reinforcement Learning on Apple Silicon
 
-* I went on paternity leave recently and wanted to have a project to learn RL between diapers change.
-* This is a side project to learn the concept of RL compared to SFT.
-* I picked up Wordle since it seems a fun and a challenging task to try to teach the LLM about it.
-* I used Gemini 2.5 Pro to brainstorm and code few functions.
-* I wanted to train on local machine to get a bit more hands on with hardware constraints.
-* I am  Running the training on Mac M4 Pro with 48 GB 
-* I picked Gemma3-it-4B
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-note: I started on Mac M1 with 16 GB and Gemma3-it-1B but when I got the M4 I switched to Gemma3-it-4B 
+This project is an exploration into training a Large Language Model (**Gemma-3 4B-it**) to play the game of Wordle using Reinforcement Learning (RL) with LoRA. The entire training and inference pipeline is optimized to run locally on Apple Silicon using the [MLX framework](https://ml-explore.github.io/mlx/build/html/index.html).
 
-## Policy Optimization Basics
+The primary goals were to gain hands-on experience with RL, understand the challenges and hardware constraints of local training, and compare RL techniques to traditional Supervised Fine-Tuning (SFT).
 
-I documented my notes in [Understanding Policy Optimization basics](docs/Understanding_basics.md) which helped me understand the basic concepts behind the (*) Policy Optimization techniques. 
+## Table of Contents
+- [Why Wordle? The RL Challenge](#why-wordle-the-rl-challenge)
+- [The Technology Stack: Why MLX?](#the-technology-stack-why-mlx)
+- [Getting Started](#getting-started)
+- [Usage](#usage)
+- [The Reinforcement Learning Strategy](#the-reinforcement-learning-strategy)
+- [Results and Analysis](#results-and-analysis)
+- [Key Lessons Learned](#key-lessons-learned)
+- [Further Reading](#further-reading)
 
 
-## Why MLX ?
-At first I started with Pytorch but then I switched to MLX for the following reasons:
 
-1) After few iterations with the Huggingface library (TRL) it seemed that I needed BitsAndBytes lib to quantize the model but it was not available on Apple Silicon [feature-request](https://github.com/bitsandbytes-foundation/bitsandbytes/issues/252).
+## Why Wordle? The RL Challenge
 
-2. I wanted to run my training locally to get a better idea of the constrained, with Pytorch I can easily run on GPU when things become too slow. So to force myself to stay on local constrained, MLX will not run on GPU (note the MLX added GPU support recently) 
-
-3. It seems MLX is 2x faster than pytorch on MPS for training: [comparison](https://github.com/ml-explore/mlx/issues/1313)
-
-4. MLX is inspired by Pytorch and Jax (See [mlx inspiration](https://ml-explore.github.io/mlx/build/html/index.html)).
-
-# What is Wordle?
+### What is Wordle?
 If you are not familiar with wordle, the best way is to play a round: [wordle-nyt](https://www.nytimes.com/games/wordle/index.html).
 
-## Do we need RL?
+### Do we need RL?
+While Wordle can be solved deterministically using algorithms based on information theory (as beautifully explained by [3Blue1Brown](https://youtu.be/v68zYyaEmEA?si=D2HJCcVa-b6uhD1i)), it presents a fascinating and constrained environment for Reinforcement Learning.
 
-We absolutely don't need RL to solve Wordle but its just fun to learn RL on Wordle.
+An algorithmic approach typically works by:
+1.  Maintaining a list of all possible secret words.
+2.  Choosing a guess that maximizes the expected information gain (entropy), effectively splitting the remaining possibilities as evenly as possible.
+3.  Filtering the list of possibilities based on the feedback and repeating the process.
 
+This project takes a different approach: **Can we teach a language model to develop a strategic policy for playing Wordle simply by rewarding good moves and penalizing bad ones?** This makes it a perfect, self-contained problem for learning and applying RL concepts.
 
-I Checkout this excellent video on [3blue1brown-wordle](https://youtu.be/v68zYyaEmEA?si=D2HJCcVa-b6uhD1i) where they walks us through how information theory can be used in order to guess the word based on the feedback.
-
-The main idea is which word should the algorithm propose in order to maximize the amount of information it will recieve from the feedback.
-Please go watch the video if we want to know more details about it. Lets look at this example where the secret word is "STARS":
+Lets look at this example where the secret word is "STARS":
 
 ```
 Played 'TARES', got feedback '---x✓'
@@ -59,278 +55,197 @@ from that feedback, there are now 7 possible words remaining.
 
 In order to guess which one of the 7, the idea behind the algorithm, is to propose a word in the allowed guesses that would provides a maximum information gain. This word 'FIORD' since we are left with only one remaining word.
 
-## Play Wordle
+### Play Wordle
 
 The following colab [scripts/wordle_no_rl.ipynb](scripts/wordle_no_rl.ipynb) implements the 3Blue1Brown wordle approach. Make a secret word and let the algorithm guess it.
 
-## Calculate wordle word entropy
+### Calculate wordle word entropy
 
 Checkout this [scripts/calculate_word_entropy_mlx.py](scripts/calculate_word_entropy_mlx.py) to calculate the entropy of each word. The result are available in [data/word_entropy.json](data/word_entropy.json)
 
 Those will be used later in our reward function.
 
+## The Technology Stack: Why MLX?
 
-# RL LoRA on Gemma3
+This project was developed entirely within the Apple Silicon ecosystem (initially M1, later M4 Pro). While PyTorch is a common choice, I switched to Apple's [MLX](https://ml-explore.github.io/mlx/build/html/index.html) framework for several key reasons:
 
-Now lets setup and go through how to run it.
+1.  **Hardware Compatibility:** Training with libraries like Hugging Face TRL often requires `bitsandbytes` for quantization, which lacks stable support for Apple Silicon ([#252](https://github.com/bitsandbytes-foundation/bitsandbytes/issues/252)). MLX is built from the ground up for unified memory and Apple's Metal Performance Shaders (MPS).
+2.  **Enforcing Local Constraints:** MLX's primary focus on Apple Silicon forced me to solve performance and memory issues locally, providing deeper insights into hardware limitations without the easy "escape hatch" of a cloud GPU.
+3.  **Performance:** Early benchmarks suggest MLX can be significantly faster than PyTorch on MPS for certain training workloads ([comparison](https://github.com/ml-explore/mlx/issues/1313)).
+4.  **Modern API:** MLX's API is inspired by both PyTorch and JAX, making it intuitive and powerful.
 
-## Setup
+This project was trained on a Mac M4 Pro with 48 GB of RAM using the `mlx-community/gemma-3-4b-it-bf16` model.
 
-Install the dependencies:
 
+## Getting Started
+
+### 1. Setup Environment
+Clone the repository and set up a Python virtual environment.
 ```sh
+git clone https://github.com/charbull/wordle-rl-gemma.git
+cd wordle-rl-gemma
+
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Run Calculate Enthropy offline
-(This is needed if you didnt run it previously)
+### 2. Download the Model
+You will need to download the Gemma-3 model weights from the Hugging Face Hub. This project uses the 4B-parameter version.
+```sh
+# For full training
+hf download mlx-community/gemma-3-4b-it-bf16
+
+# For faster iteration/testing
+hf download mlx-community/gemma-3-270m-it-bf16
+```
+*Note: Update the model path in your config file to point to the downloaded directory.*
+
+## Usage
+
+The training and inference scripts are controlled by a central `config.json` file. This file specifies the model, data paths, LoRA configuration, RL parameters, and more. See [`src/utils/config.py`](src/utils/config.py) for detailed field descriptions.
+
+### 1. Pre-computation (Optional)
+The reward function uses word entropy to encourage smart opening guesses. You can pre-calculate this for the entire word list.
 ```sh
 python -m scripts.calculate_word_entropy_mlx
 ```
+Results are saved to `data/word_entropy.json`.
 
-## Download the model
-```sh
-hf download mlx-community/gemma-3-4b-it-bf16
-```
-
-and if you are planning to have a quick run/iterate use the smaller model, you can increase the number of generations.
-```sh
-hf download mlx-community/gemma-3-270m-it-bf16
-```
-
-## Generate Synthetic data
-
-We need to generate synthetic data to provide the model with previous turns between [0 ..4] and the model will need to continue the game from the previous state. This would allow to advance the training instead of the model getting stuck on the first turns.
-
+### 2. Generate Synthetic Data
+To train the model effectively, we generate synthetic game data. This provides the model with partially completed games (0-4 turns of history), allowing it to learn from various states instead of getting stuck on opening moves.
 ```sh
 python -m scripts.data_synth --mode rl
 ```
 
-## Empty your cache
-Flush your cache or restart before training to avoid high memory swaps.
+### 3. Clear System Cache
+Before starting a long training run, it's recommended to clear your system's memory cache to prevent slowdowns from memory swapping.
 ```sh
 sudo purge
 ```
 
-## Run training
-
-The training and inference rely on the config.json file, it contains all the necessary information for training such as the model name/variant, the data path, the lora config, rl config, sampling, checkpoint resume, and many others, the fields are detailed in [src/utils/config.py](src/utils/config.py)
-
+### 4. Run Training
+Start the RL training process using the desired configuration file.
 ```sh
 python -m scripts.train_gemma_rl --config ./config/grpo_lora_config.json
 ```
 
-## Plot the cumulative wins during training
+### 5. Evaluate a Pre-Trained Model
+A LoRA adapter trained for 500 steps is available on the [Hugging Face Hub](https://huggingface.co/charbull/mlx_gemma3_4b_wordle_lora). You can download it and run side-by-side comparisons against the base model.
 ```sh
-python -m scripts.plot_cumulative_wins --file ./logs/rl_wordle_metrics_20250819-074356.jsonl
+# Run a single game (6 turns)
+python -m scripts.play_sxs.py
+
+# Run a full evaluation across 150 games
+python -m scripts.evaluation_sxs.py
 ```
 
-## Run unit tests
+### 6. Plot Training Metrics
+Visualize the cumulative wins and loss curves from a training log file.
+```sh
+python -m scripts.plot_cumulative_wins --file ./logs/your_metrics_file.jsonl
+```
 
+### 7. Run Unit Tests
 ```sh
 python -m unittest
 ```
 
-or 
-```sh
-python -m unittest discover tests
-```
+---
 
-## Run from a trained model already
-If you dont want to run you may download and run a 500 steps trained model that is available on HuggingFace repo.
+## The Reinforcement Learning Strategy
 
-[https://huggingface.co/charbull/mlx_gemma3_4b_wordle_lora](https://huggingface.co/charbull/mlx_gemma3_4b_wordle_lora)
+The core of this project is the reward function, which guides the agent to become a proficient Wordle player. It's a combination of strong penalties (the "stick") for breaking rules and positive bonuses (the "carrot") for strategic play.
 
-TODO: change to safetensors format.
+###  Penalties (The "Stick")
+These are designed to teach the fundamental rules of the game.
+- **`format_fail_penalty`**: Large penalty for not producing a valid 5-letter word.
+- **`repetition_penalty`**: Penalty for guessing a word that has already been used.
+- **`not_in_dictionary_penalty`**: Penalty if the guess is not in the official Wordle dictionary.
+- **Clue Inconsistency Penalties**:
+    - **`green_position_penalty`**: Not using a known green letter in its correct spot.
+    - **`yellow_letter_penalty`**: Failing to include a known yellow letter in the guess.
+    - **`gray_letter_penalty`**: Using a letter that has been confirmed to be absent.
 
-You can run the following which compares the LoRA adapter with the base model:
+### Bonuses (The "Carrot")
+These are designed to encourage intelligent, information-seeking behavior.
+- **`solution_correct_guess`**: Large positive reward for winning the game.
+- **`valid_guess_base`**: Small base reward for any valid guess to encourage participation.
+- **Information Gain Bonuses**:
+    - **Turn 1 (`information_gain_bonus`)**: The reward is scaled by the pre-calculated entropy of the first word, encouraging optimal openers like "SOARE" or "CRANE".
+    - **Turns 2-6 (`new_letter_bonus`)**: The reward is based on the number of new, previously unused letters in the guess, promoting exploration.
+- **`possibility_reduction_bonus`**: A direct reward proportional to the percentage of possible solutions eliminated by the guess.
 
-* [scripts/generate_sxs.py](scripts/generate_sxs.py): play one turn
-* [scripts/play_sxs.py](scripts/play_sxs.py): play one game of 6 turns.
-* [scripts/evaluation_sxs.py](scripts/evaluation_sxs.py): play 150 games, you can decide if its with history or without. Note that the data was not seen during training and eval.
+### Efficiency Penalties
+These are "soft" penalties to refine the agent's behavior and encourage efficiency.
+- **`time_penalty_per_guess`**: Small penalty for each turn taken, incentivizing faster solutions.
+- **Stagnation Penalties**: Penalties for reusing known green or yellow letters inefficiently, encouraging the use of "eliminator" words with new letters to gain more information.
+- **`length_penalty_per_token`**: Minor penalty on response length to encourage concise thinking.
 
-The data preparation is implemented in [src/wordle/game#prepare_data.py](src/wordle/game.py)
+---
 
 
----------------
-# WIP : Cleaning needed below
------------------------
-# Metrics
 
-We ran training for 500 steps with the following grpo config [config/grpo_lora_config.json](config/grpo_lora_config.json)
 
-## Training
+## Results and Analysis
 
-The training and Eval are outlined in the following:
-![image](./docs/plots/cumulative_wins_train_vs_eval_training_metrics.png)
+Training was run for 500 steps using the configuration in `config/grpo_lora_config.json`.
 
+### Training Performance
+The model showed a clear learning trend, with the cumulative win rate increasing steadily during both training and evaluation phases.
 
-The loss curve
-![image](./docs/plots/training_curves_20250824-133827.png)
+![Training vs Eval Cumulative Wins](./docs/plots/cumulative_wins_train_vs_eval_training_metrics.png)
+![Training Loss Curve](./docs/plots/training_curves_20250824-133827.png)
 
+### Evaluation: LoRA vs. Base Model
+We evaluated the trained LoRA adapter against the base Gemma-3 model on 150 unseen games. We tested two key variables: **game history** (starting from scratch vs. a partially completed game) and **sampling temperature** (deterministic vs. creative guesses).
 
-## Evaluation
+#### With Game History (Starting from Turns 1-4)
+Providing the model with previous turns gives it crucial context, leading to a dramatic improvement in performance.
 
-During training and sampling evaluation, the eval data had a random (0, 4) history turns where we picked carefully logical attempts that brings the model closer to the solution.
+*   **Temperature = 0.1 (More Deterministic)**: The trained model's choices are more focused, leading to a consistent and significant performance gain over the base model.
+    ![Cumulative Wins with History, Temp 0.1](./docs/plots/cumulative_wins_sxs_lora_base_150_games_with_history_temp01.png)
+    ![Win Comparison with History, Temp 0.1](./docs/plots/model_comparison_wins_num_games_145_with_history_temp01.png)
 
-In this section, we did two rounds one with history (0, 4) turns, and one without history the model start with turn 1.
+*   **Temperature = 0.9 (More Creative)**: With higher temperature, the model's guesses are more random. While it still outperforms the base model, its win rate is lower and less consistent compared to the low-temperature setting.
+    ![Cumulative Wins with History, Temp 0.9](./docs/plots/cumulative_wins_sxs_lora_base_150_games_with_history_temp_09.png)
+    ![Win Comparison with History, Temp 0.9](./docs/plots/model_comparison_wins_num_games_145_with_history_temp_09.png)
 
-### With History
 
-We ran 150 games with history
+#### Without Game History (Starting from Turn 1)
+When starting from scratch, the model's performance drops significantly, highlighting its weakness in developing an optimal opening strategy.
 
-#### With sampling temperature=0.1
+*   **Temperature = 0.1**: The LoRA model still shows a slight edge, but the performance for both models is much lower.
+    ![Cumulative Wins without History, Temp 0.1](./docs/plots/cumulative_wins_sxs_lora_base_150_games_without_history_temp01.png)
+    ![Win Comparison without History, Temp 0.1](./docs/plots/model_comparison_wins_num_games_145_without_history_temp01.png)
 
-* ![image](./docs/plots/cumulative_wins_sxs_lora_base_150_games_with_history_temp01.png)
+*   **Temperature = 0.9**: At high temperature and with no history, the strategic advantage is nearly lost, and performance is poor for both models.
+    ![Cumulative Wins without History, Temp 0.9](./docs/plots/cumulative_wins_sxs_lora_base_150_games_without_history_temp09.png)
+    ![Win Comparison without History, Temp 0.9](./docs/plots/model_comparison_wins_num_games_145_without_history_temp09.png)
 
-* ![image](./docs/plots/model_comparison_wins_num_games_145_with_history_temp01.png)
+### Analysis and Key Findings
+1.  **Game History is Crucial**: The model's primary strength is using constraints from previous turns. Its performance is dramatically better when it has context to work with.
+2.  **Low Temperature Wins**: For a logical puzzle like Wordle, a lower sampling temperature (e.g., 0.1) consistently yields better results. The deterministic, high-probability choices are more effective than the creative, random guesses introduced by a high temperature.
+3.  **Weak Opening Strategy**: The model is effective at deduction but has not learned an optimal opening strategy. Its performance is highly dependent on its default first guess, which explains the poor results when starting without history.
 
-#### With sampling temperature=0.9
+**Next Steps to Improve Performance:**
+- **Hybrid Approach**: The most practical improvement would be to **hard-code the first guess** to be an optimal word (like `CRANE` or `SOARE`) and let the fine-tuned model take over from turn two. This guarantees a strong, information-rich start every time.
 
-* ![image](./docs/plots/cumulative_wins_sxs_lora_base_150_games_with_history_temp_09.png)
+---
 
-* * ![image](./docs/plots/model_comparison_wins_num_games_145_with_history_temp_09.png)
+## Key Lessons Learned
 
-### Without History
+This project provided several critical insights into training RL agents locally.
 
-We ran 150 games without history
+1.  **The Environment is Everything.** Most initial bugs were not in the RL logic but in the game environment itself. **Unit testing** the core game logic was the most effective debugging tool, preventing costly failed training runs.
+2.  **RL is a Battle Against "Reward Hacking".** An RL agent will exploit any loophole in your reward function. Early models learned to output empty strings because the penalty for inaction was less than the penalty for a wrong guess. The fix was to make format failures unequivocally the worst possible outcome.
+3.  **Prompt Engineering is a High-Impact Lever.** The model's performance improved significantly when we switched from symbolic feedback (`✓✓xxx`) to a clear, plain-English state summary (`Green Letters: A, R. Gray Letters: T, E, S...`). Explicitly adding "**Do not repeat any words...**" to the prompt was more effective than relying solely on a negative reward.
+4.  **A Data Curriculum is Crucial.** Training only on "Turn 1" prompts was ineffective. The breakthrough came from creating a curriculum with a **random history of 0-4 turns**. This exposed the model to a rich diversity of game states and dramatically accelerated learning.
+5.  **"Straight to RL" is a High-Wire Act.** Training with RL from a general-purpose base model (without a Supervised Fine-Tuning step) is possible but highly unstable and sensitive to hyperparameters. A slightly too-high learning rate caused a catastrophic **policy collapse**. For smaller models, an initial SFT phase is likely essential.
+6.  **Know Your Hardware's Hidden Bottlenecks.** A massive 8x slowdown was caused by the system running out of RAM and using **20 GB of memory swap**. A simple reboot fixed it. Furthermore, the `num_generations` parameter is extremely memory-intensive due to the **KV Cache**, as each parallel generation requires its own multi-gigabyte cache in memory.
 
-#### With sampling temperature=0.1
+## Further Reading
+- [**Understanding Policy Optimization basics**](./docs/Understanding_basics.md): My personal notes documenting the core concepts behind Policy Optimization techniques.
 
-* ![image](./docs/plots/cumulative_wins_sxs_lora_base_150_games_without_history_temp01.png)
-
-* ![image](./docs/plots/model_comparison_wins_num_games_145_without_history_temp01.png)
-
-#### With sampling temperature=0.9
-
-* ![image](./docs/plots/cumulative_wins_sxs_lora_base_150_games_without_history_temp09.png)
-
-* ![image](./docs/plots/model_comparison_wins_num_games_145_without_history_temp09.png)
-
-## Weakness of the model
-
-The "LoRA (History)" models show a dramatic improvement in performance, as expected when providing the model with the context of previous turns. The model with a lower temperature (Temp 0.1), which makes more deterministic choices, outperforms the one with a higher temperature (Temp 0.9), which is more random.
-### What this means for performance:
-
-*   **Good but not Perfect:** The model can still perform well because, after the first guess, it's quite good at using the constraints to narrow down the possibilities.
-*   **Vulnerable to Bad Starts:** If its default opening word happens to be a poor one for a specific puzzle (e.g., guessing `AUDIO` when the word is `SIGHT`), it starts with a significant disadvantage and may not be able to recover within the six-guess limit. This likely accounts for many of its losses.
-
-### How to fix this (as a next step):
-
-To reach the next level of performance, we would need to teach it that opening strategy. There are two common ways to do that:
-
-1.  **Fine-tune on Expert Data:** We could create a new dataset where every game transcript begins with a strategically optimal word. By training on this "expert" data, the model would learn to mimic this superior opening behavior.
-2.  **Hybrid Approach (Most Practical):** A simpler and very effective method would be to **hard-code the first guess** to always be an optimal word like `CRANE`, and then let the fine-tuned model take over for all subsequent turns. This guarantees a strong, information-rich start every single time.
-
-Your observation perfectly highlights the next logical step in improving this model's performance: teaching it not just how to play, but how to play *strategically* from the very first move.
-
-
-# Summary of the Reinforcement Learning Reward Strategy
-
-This section outlines the reward strategy used to train an AI agent to play Wordle. The goal is to teach the agent not only to win but to do so efficiently and strategically by following the game's rules and making intelligent guesses.
-
-The system calculates two primary values for each guess:
-1.  **Game Score**: A score that reflects the quality of the Wordle guess itself.
-2.  **Training Reward**: The `game_score` adjusted by penalties for efficiency (like turn count and response length), which is used directly to update the model during training.
-
-The total reward is a composite of several components, categorized into penalties for mistakes and bonuses for good strategy.
-
-## 1. Penalties for Rule Violations and Mistakes (The "Stick")
-
-These are strong negative rewards designed to quickly teach the agent the fundamental rules and constraints of the game.
-
-*   **Invalid Formatting (`format_fail_penalty`):** A large penalty is applied if the model's response does not contain a valid 5-letter word. This is the most basic rule.
-*   **Repeated Guesses (`repetition_penalty`):** The agent is penalized for guessing a word it has already used in the current game.
-*   **Clue Inconsistency:** The agent is heavily penalized for making guesses that contradict information from previous turns. The system maintains a state of known letters:
-    *   **Green Letters:** Known letters in their correct positions.
-    *   **Yellow Letters:** Known letters that are in the word but in the wrong position.
-    *   **Gray Letters:** Known letters that are not in the word at all.
-    Penalties are applied for:
-    *   **Green Violation (`green_position_penalty`):** Not placing a known green letter in its correct spot.
-    *   **Yellow Violation (`yellow_letter_penalty`):** Failing to include a known yellow letter anywhere in the guess.
-    *   **Gray Violation (`gray_letter_penalty`):** Using a letter that has previously been identified as gray.
-*   **Invalid Word (`not_in_dictionary_penalty`):** A penalty is applied if the guess is a 5-letter word but is not in the official Wordle dictionary.
-
-## 2. Bonuses for Strategic Play (The "Carrot")
-
-These are positive rewards designed to encourage intelligent, information-seeking behavior.
-
-*   **Winning the Game (`solution_correct_guess`):** A large, positive reward is given for correctly guessing the secret word, as this is the ultimate objective.
-*   **Base Reward for a Valid Guess (`valid_guess_base`):** Any valid, non-losing guess receives a small base reward to encourage participation.
-*   **Strategic Information Gain (Turn-Dependent):** The system uses two different strategies to reward information gain based on the turn number.
-    *   **Turn 1: Information Gain Bonus (`information_gain_bonus_coeff`):** For the first guess, the agent is rewarded based on a pre-calculated entropy score for its chosen word. This encourages the use of optimal starting words (like "SOARE" or "CRANE") that are statistically most likely to reveal the most information about the secret word.
-    *   **Turns 2-6: New Letter Exploration Bonus (`new_letter_bonus`):** After the first turn, the strategy shifts to rewarding exploration. The agent receives a bonus for each new, previously unused letter it includes in its guess. This encourages the agent to use its turns to test new characters and narrow down the possibilities.
-*   **Possibility Reduction Bonus (`possibility_reduction_bonus`):** This is a direct reward for making an informative guess. The system calculates the number of possible remaining answers before and after the current guess. The reward is proportional to the percentage of possible solutions that were eliminated by the guess, directly incentivizing moves that prune the search space effectively.
-
-## 3. Penalties for Inefficiency
-
-These are "soft" penalties designed to refine the agent's behavior, encouraging it to be not just correct, but also efficient.
-
-*   **Stagnation Penalty:** This discourages wasting a guess by reusing known information inefficiently.
-    *   **Green Reuse (`green_reuse_penalty`):** A penalty for placing a known green letter in its correct spot again. That letter slot is already "solved," so it should be used to test a new letter if possible.
-    *   **Yellow Reuse (`yellow_reuse_penalty`):** A penalty for using a known yellow letter in a guess. This encourages the agent to use "eliminator" words with all-new letters to discover more greens and yellows, rather than just rearranging known yellows.
-*   **Time Penalty (`time_penalty_per_guess`):** A small, constant penalty is applied for every guess made. This incentivizes the agent to solve the puzzle in as few turns as possible.
-*   **Response Length Penalty (`length_penalty_per_token`):** A minor penalty is applied based on the total number of tokens in the model's generated response (including its reasoning). This encourages concise output.
-
-By combining these elements, the reward strategy guides the agent to become a proficient Wordle player that respects the rules, employs intelligent information-gathering tactics, and aims to solve the puzzle efficiently.
-
-
-# Lessons Learned: Training a Wordle-Solving RL Agent
-
-Over the course of training a language model to play Wordle using Reinforcement Learning, we encountered and solved a series of progressively more complex challenges. This document summarizes the key technical and strategic lessons from that process for our colleagues.
-
-## **Lesson 1: The System is the Foundation. Get it Right First.**
-
-The majority of our initial debugging was not about AI strategy, but about fundamental software engineering and data integrity. An RL agent cannot learn if its environment is flawed.
-
-*   **Isolate and Verify:** The most effective debugging tool was **unit testing**. Writing specific tests for core game logic allowed us to isolate and fix bugs before attempting long, expensive training runs.
-*   **Single Source of Truth:** Refactoring shared logic (feedback generation, clue summarization) into a canonical `game_logic.py` file was critical. It eliminated inconsistencies between data generation, training, and evaluation.
-
-## **Lesson 2: RL is a Battle Against "Reward Hacking"**
-
-An RL agent is a relentless optimizer. It will not learn what you *want* it to learn; it will learn what you *incentivize* it to learn. Any loophole in the reward function will be found and exploited.
-
-*   **Initial Hacks:** Our first model learned to output empty strings or repetitive gibberish (`Final Final Final...`). It discovered that the penalty for this "lazy" inaction was sometimes less severe than the penalty for making a thoughtful but incorrect guess.
-*   **The Fix:** We had to make the penalty for format failures (`format_fail_penalty`) unequivocally the worst possible outcome. This closed the loophole and forced the model to engage with the actual task.
-*   **The Takeaway:** Meticulously design your reward function to be free of exploits. The base penalty for failing to follow the rules must be significantly worse than the penalty for a strategic mistake.
-
-## **Lesson 3: Prompt Engineering is a High-Impact Lever**
-
-The model's performance is not just a function of its weights, but of the quality and clarity of the input it receives.
-
-*   **Model Feedback Format:** We iterated on the prompt format significantly. Initial versions used symbols (`✓✓xxx`), which were less effective. The best results came from providing a complete, plain-English "state summary" (`Current Knowledge:`, `Green Letters:`, `Words Already Guessed:`, etc.). Clear, structured, natural language is key.
-*   **Explicit Instruction:** The model often repeated guesses. Instead of only punishing this with a negative reward, we explicitly added "**Do not repeat any words...**" to the prompt. This transformed the constraint from a learned punishment to a direct instruction, which was far more effective at eliminating the behavior.
-
-## **Lesson 4: Data and Curriculum Drive the Learning Curve**
-
-The structure of the training data had a direct and measurable impact on the model's ability to learn.
-
-*   **The Importance of Game History:** Initially, we trained the model only on "Turn 1" prompts (starting from scratch). The model struggled to learn.
-*   **Building a Curriculum:**
-    1.  Introducing prompts with a **single previous guess** in the history allowed the model to start learning, reaching a baseline win rate.
-    2.  Expanding the data to include a **random history of 0-4 turns** was the key breakthrough. This provided a rich curriculum of diverse game states and significantly boosted the win rate and the model's ability to win in fewer turns.
-
-## **Lesson 5: "Straight to RL" is a High-Wire Act**
-
-A key finding was the challenge of training a model with RL **without a preceding Supervised Fine-Tuning (SFT) step.** While our Rank 16 run proved this is possible, it is a difficult and unstable path.
-
-*   **The Stability Challenge:** Starting with a generalist model, RL must teach both the task format and strategy simultaneously. This proved highly sensitive to hyperparameters. A Rank 64 run with a slightly too-high learning rate led to a catastrophic **policy collapse** where performance dropped to 0%.
-*   **The Role of Model Size:** Smaller models (e.g., 1B parameters) struggled significantly with this approach. They often failed to adhere to the required format (`<think>`, `<guess>`, 5-letter words), indicating they lacked the capacity to learn the structure from the RL signal alone. For smaller models, SFT is likely not just helpful, but necessary.
-*   **Gradient Clipping:** We found that robust **gradient clipping** was more crucial than initially thought for maintaining stability in this "straight to RL" setup. Experimenting to find the right clipping value was a key step.
-
-## **Lesson 6: Know Your Hardware and Its "Hidden" Bottlenecks**
-
-*   **System Monitoring is Crucial:** A catastrophic 8x slowdown was diagnosed not by a code bug, but by observing the **system's memory usage.** Heavy memory swapping (`20 GB Swap Used`) was crippling the training process. A simple system restart to clear the memory was the fix. The health of the hardware is a critical, non-obvious hyperparameter.
-*   **The Cost of Generations (KV Cache):** We learned that `num_generations` is extremely memory-intensive. This is due to the **KV Cache**, the model's "working memory." Each parallel generation requires its own multi-gigabyte KV Cache. Increasing from 2 to 4 generations had a massive memory impact, whereas increasing the LoRA rank was comparatively cheap in terms of RAM. Understanding this trade-off is essential for configuring runs that don't overload your hardware. The KV cache is enormous. Its size is determined by: (Number of Layers) * (Context Length) * (Hidden Dimension) * (Number of Heads) * (Bytes per Parameter). With num_generations = 4: the model needs memory for its weights. It must create and hold four separate KV Caches in memory simultaneously. Memory Usage: Model Weights + 4 * (KV Cache Size)
-
-## **A Note on Fusing and Model Corruption**
-
-An early experiment with a 1B parameter model on a different task revealed a potential issue with LoRA adapter merging. When fusing weights trained on simple SFT data, the model behaved correctly. However, when fusing weights trained on the more complex Chain-of-Thought Wordle data, the model's output became gibberish. This suggests that either there was a bug in the fusing script or that the complex CoT training can lead to adapter weights that, when merged, corrupt the base model's integrity. This was not fully investigated as we moved to a more powerful machine and a larger model where this issue did not present.
-
-## **Final Conclusion**
-
-Training a specialized RL agent is an iterative, holistic process. The journey from a 0% to a ~30% win rate was not a single optimization but a series of fixes and improvements across the entire stack: from robust testing and clean data pipelines to nuanced prompt engineering, careful hardware monitoring, and a deep understanding of the reward landscape. Each failure provided the necessary data to build a more robust and intelligent final system.
 
 
