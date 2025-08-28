@@ -32,7 +32,7 @@ def play_side_by_side(training_config_path: str, lora_adapter_path, metrics_file
     )
     lora_model = lora.load_adapter(model=lora_model_with_layers, adapter_path=lora_adapter_path)
     
-    # --- 3. Load a SEPARATE, CLEAN Base Model for Comparison ---
+    # --- 3. Load a Base Model for Comparison ---
     print("\nLoading a clean base model for comparison...")
     base_model, _ = load(training_config.model.name)
 
