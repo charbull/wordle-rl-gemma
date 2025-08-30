@@ -38,9 +38,9 @@ Cross-entropy measures how different the predicted distribution $Q$ is from the 
 * If $Q$ is very different from $P$, the cross-entropy will be high.
 
 
-*   In typical SFT for LLMs, cross-entropy loss (often simplified to $-\log P(\text{correct token})$ or $-\log P(\text{correct class})$) is used when we have a ground truth target.
+*   In typical SFT for LLMs, cross-entropy loss (often simplified to $$-\log P(\text{correct token})$$ or $$-\log P(\text{correct class})$$) is used when we have a ground truth target.
 *   For SFT, the "ground truth" is the next token in a human-written demonstration. We are trying to make the model $\pi_\theta$ predict that specific token with high probability.
-    *   Example: $\text{Loss} = -\log \pi_\theta(y_{\text{target}} | x)$ (simplified for a whole sequence).
+    *   Example: $$\text{Loss} = -\log \pi_\theta(y_{\text{target}} | x)$$ (simplified for a whole sequence).
 *   Here, $\pi_\theta$ is being directly compared to a fixed, known "correct" output. The goal is for the model's predicted distribution $Q$ to match the true distribution $P$
 
 ### 2. The Goal of DPO/GRPO: Relative Preference & Regularization
@@ -50,7 +50,7 @@ Cross-entropy measures how different the predicted distribution $Q$ is from the 
     1.   <font color='red'> Maximize the probability of </font> $y_c$ *relative to* $y_r$.
     2.  Do so in a way that doesn't drastically change the model from its initial, well-behaved state (the reference model $\pi_{\text{ref}}$, usually the SFT model).
 *   <font color='red'> This "not drastically changing" part is crucial</font>. It's where the idea of **KL Divergence** becomes central. In the original Reinforcement Learning from Human Feedback (RLHF) formulation, the objective is to maximize reward *while constraining the KL divergence between the policy $\pi_\theta$ and the reference policy $\pi_{\text{ref}}$*:
-    *   RLHF Objective (conceptual): $\text{Maximize } E[\text{Reward}(y)]$ subject to $D_{KL}(\pi_\theta || \pi_{\text{ref}}) \le \beta_{KL}$
+    *   RLHF Objective (conceptual): $$\text{Maximize } E[\text{Reward}(y)]$ subject to $D_{KL}(\pi_\theta || \pi_{\text{ref}}) \le \beta_{KL}$$
     *   <font color='red'>This KL constraint prevents "reward hacking" (where the model finds trivial solutions to get high reward while destroying its general language abilities) by keeping it close to </font> $\pi_{\text{ref}}$.
 
 
@@ -59,10 +59,10 @@ Cross-entropy measures how different the predicted distribution $Q$ is from the 
 ### 3. DPO's Key Insight: Implicit Reward and the KL Connection
 
 *   DPO provides a way to achieve the goals of KL-regularized RLHF *without* explicitly training a reward model or performing reinforcement learning.
-*   It shows that the optimal policy $\pi^*$ for the KL-constrained reward maximization problem above can be written as: $ \pi^*(y|x) = \frac{1}{Z(x)} \pi_{\text{ref}}(y|x) \exp\left(\frac{1}{\beta_{DPO}} r(x,y)\right)$
+*   It shows that the optimal policy $\pi^*$ for the KL-constrained reward maximization problem above can be written as: $$ \pi^*(y|x) = \frac{1}{Z(x)} \pi_{\text{ref}}(y|x) \exp\left(\frac{1}{\beta_{DPO}} r(x,y)\right)$$
 where $r(x,y)$ is the (unknown) true reward function, $\beta_{DPO}$ is a scaling factor (like temperature), and $Z(x)$ is a partition function (normalizer).
 *   Rearranging this, we can express the reward function in terms of the policies:
-$r(x,y) \propto \log\left(\frac{\pi^*(y|x)}{\pi_{\text{ref}}(y|x)}\right) $
+$$r(x,y) \propto \log\left(\frac{\pi^*(y|x)}{\pi_{\text{ref}}(y|x)}\right) $$
 Ignoring $\beta_{DPO}$ and $Z(x)$ for proportionality as $Z(x)$ is constant for a given $x$ when comparing two responses).
 *   Effectively, the "advantage" or implicit reward of a response $y$ by policy $\pi_\theta$ over $\pi_{\text{ref}}$ is proportional to:
 $\log \pi_\theta(y|x) - \log \pi_{\text{ref}}(y|x)$ (which is $\log\left(\frac{\pi_\theta(y|x)}{\pi_{\text{ref}}(y|x)}\right)$)
@@ -75,7 +75,7 @@ The DPO/GRPO loss is (for a single chosen $y_c$ and rejected $y_r$ for simplicit
 $$ \text{Loss} = -\log\left(\sigma\left( \beta_{DPO} \left[ (\log \pi_\theta(y_c|x) - \log \pi_{\text{ref}}(y_c|x)) - (\log \pi_\theta(y_r|x) - \log \pi_{\text{ref}}(y_r|x)) \right] \right)\right) $$
 (where $\sigma$ denotes the sigmoid function)
 
-*   The terms $(\log \pi_\theta(y|x) - \log \pi_{\text{ref}}(y|x))$ are precisely these implicit reward estimates, derived from the logic connecting to KL-regularized RL.
+*   The terms $$(\log \pi_\theta(y|x) - \log \pi_{\text{ref}}(y|x))$$ are precisely these implicit reward estimates, derived from the logic connecting to KL-regularized RL.
 *   <font color='red'>  The loss function aims to maximize the difference between the implicit reward of  </font> $y_c$ and $y_r$.
 *   By optimizing these log-probability ratios, DPO/GRPO implicitly finds a policy $\pi_\theta$ that is optimal under the Bradley-Terry model (which models preferences based on reward differences) *and* inherently respects the KL divergence constraint from the original RLHF problem.
 
