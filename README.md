@@ -245,7 +245,7 @@ This project provided several critical insights into training RL agents locally.
 6.  **Know Your Hardware's Hidden Bottlenecks.** A massive 8x slowdown was caused by the system running out of RAM and using **20 GB of memory swap**. A simple reboot fixed it. Furthermore, the `num_generations` parameter is extremely memory-intensive due to the **KV Cache**, as each parallel generation requires its own multi-gigabyte cache in memory.
 
 ## Further Reading
-- [**Understanding Policy Optimization basics**](./docs/Understanding_basics.md): My personal notes documenting the core concepts behind Policy Optimization techniques.
+- [**Understanding Policy Optimization basics**](./docs/understanding_basics.ipynb): My personal notes documenting the core concepts behind Policy Optimization techniques.
 
 
 
