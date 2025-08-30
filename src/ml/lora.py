@@ -56,7 +56,7 @@ class LoRALinear(nn.Module):
         lora_a_t = self.lora_a.T
         lora_b_t = self.lora_b.T
 
-        # Correct matrix multiplication: (out, rank) @ (rank, in) -> (out, in)
+        # matrix multiplication: (out, rank) @ (rank, in) -> (out, in)
         delta_w = (self.scale * lora_b_t) @ lora_a_t
         print(f"Delta weights shape: {delta_w.shape}, dtype: {delta_w.dtype}")
         fused_weight = weight.astype(delta_w.dtype) + delta_w

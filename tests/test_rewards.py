@@ -125,7 +125,6 @@ class TestCalculateTotalReward(unittest.TestCase):
 
     @patch('src.wordle.rewards.reward_for_possibility_reduction', return_value=0.0)
     def test_turn2_bonus_is_correct_for_mixed_new_and_old_letters(self, mock_reduction_bonus):
-        """REVISED: Tests the exploration bonus with a clear, unambiguous state."""
         secret_word = "GHOST"
         # Turn 1: Guessed 'TRAIN'. Feedback vs GHOST is all gray.
         # Known letters are {T,R,A,I,N}. All are gray.
@@ -300,7 +299,6 @@ class TestCalculateTotalReward(unittest.TestCase):
         for the secret word 'STAGE' to validate both clue aggregation and
         violation counting.
         """
-        # SETUP THE EXACT SCENARIO
         secret_word = "STAGE"
         self.allowed_words.add("STAGE")
         self.allowed_words.add("GAVEL")
@@ -338,7 +336,6 @@ class TestCalculateTotalReward(unittest.TestCase):
         # 4. Calculate the final expected game score
         expected_score = potential_score - total_penalty # 14.5 - 55.0 = -40.5
         
-        # --- EXECUTE AND ASSERT ---
         game_score, _ = calculate_total_reward(
             response, secret_word, past_feedback, self.mock_config,
             self.allowed_words, self.mock_tokenizer
@@ -356,7 +353,6 @@ class TestCalculateTotalReward(unittest.TestCase):
         This test will fail if green clues ('✓') are incorrectly added to the
         yellow set, or if green violations are not counted correctly.
         """
-        # SETUP THE EXACT SCENARIO FROM THE LOG
         secret_word = "STAGE"
         # Ensure all relevant words are in the allowed dictionary for the test
         self.allowed_words.update({"STAGE", "GAVEL", "CHASE"})
@@ -370,7 +366,6 @@ class TestCalculateTotalReward(unittest.TestCase):
         # The guess to be evaluated in Turn 2
         response = "<guess>CHASE</guess>"
         
-        # --- EXPECTED STATE AND CALCULATIONS ---
         # After 'GAVEL', the correct clue state should be:
         # known_green = {1: 'A', 3: 'E'}
         # known_yellow = {'G'}
@@ -638,9 +633,7 @@ class TestPossibilityReductionReward(unittest.TestCase):
         """
         Tests that the bonus is calculated correctly based on the reduction
         of possible words.
-        """
-        # --- 1. SETUP ---
-        
+        """        
         # Simulate a game history
         past_feedback = [GuessFeedback(guess="ARISE", feedback="Y X X X X")]
         # The new guess that causes the reduction
@@ -649,27 +642,21 @@ class TestPossibilityReductionReward(unittest.TestCase):
         # Configure the mock to simulate the reduction
         # Let's say there were 100 possible words before the guess...
         possibilities_before = ["WORD"] * 100
-        # ...and only 20 possible words after the guess.
+        # and only 20 possible words after the guess.
         possibilities_after = ["WORD"] * 20
         
         # The mock will return these lists when called
         mock_find_completions.side_effect = [possibilities_before, possibilities_after]
-
-        # --- 2. CALCULATE EXPECTED RESULT ---
         
         # Reduction = (100 - 20) / 100 = 0.8
         reduction_fraction = (100 - 20) / 100
         # Bonus = 0.8 * 10.0 (from config) = 8.0
         expected_bonus = reduction_fraction * self.mock_config.reward["possibility_reduction_bonus"]
-        
-        # --- 3. EXECUTE ---
-        
+                
         actual_bonus = reward_for_possibility_reduction(
             past_feedback, new_feedback, self.mock_config
         )
-        
-        # --- 4. ASSERT ---
-        
+                
         self.assertAlmostEqual(actual_bonus, expected_bonus)
         # Verify that find_valid_completions was called twice, as expected
         self.assertEqual(mock_find_completions.call_count, 2)

@@ -27,8 +27,6 @@ from collections import deque
 # ==============================================================================
 # ---  HELPER FUNCTIONS ---
 # ==============================================================================
-# In utils/rl_trainer.py
-
 from collections import deque
 from typing import Deque
 

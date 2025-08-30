@@ -109,10 +109,8 @@ class TestTrainerResumeLogic(unittest.TestCase):
             # Make the mocked evaluate function return an empty list to avoid downstream errors
             mock_evaluate.return_value = []
 
-            # --- EXECUTE ---
             rl_trainer.train(config=config, system_prompt="Test")
 
-            # --- ASSERT ---
             # 1. Verify resume setup was triggered. This remains the same.
             # The log should be truncated AT the completed step.
             mock_truncate_log.assert_called_once_with(Path(run_dir / "training_metrics.jsonl"), resume_step)
