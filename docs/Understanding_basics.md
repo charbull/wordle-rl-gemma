@@ -1,7 +1,7 @@
 # Understanding Policy Optimization
 
-This colab contains my notes to understand better how Policy Optimizations work:
-* Direct Policy Optimization [DPO paper](https://arxiv.org/pdf/2305.18290) 
+This section contains my notes to understand better how Policy Optimizations work:
+* Direct Policy Optimization [DPO paper](https://arxiv.org/pdf/2305.18290)
 * Group Sequence Policy Optimization [GSPO paper](https://arxiv.org/pdf/2507.18071).
 * Group Relative Policy Optimization [DeepSeek GRPO related paper](https://arxiv.org/abs/2402.03300)
 * Group Sequence Policy Optimization [GSPO paper](https://arxiv.org/pdf/2507.18071).
@@ -33,7 +33,7 @@ If we have:
 * The True Distribution ($P$): This represents the actual, real-world probabilities of different events or classes. In supervised learning, this is our ground truth label.
 * The Predicted Distribution ($Q$): This is what the model predicts for the probabilities of those same events or classes.
 
-Cross-entropy measures how different the predicted distribution $Q$ is from the true distribution $P$. 
+Cross-entropy measures how different the predicted distribution $Q$ is from the true distribution $P$.
 * If $Q$ is very similar to $P$, the cross-entropy will be low.
 * If $Q$ is very different from $P$, the cross-entropy will be high.
 
@@ -50,7 +50,7 @@ Cross-entropy measures how different the predicted distribution $Q$ is from the 
     1.   <font color='red'> Maximize the probability of </font> $y_c$ *relative to* $y_r$.
     2.  Do so in a way that doesn't drastically change the model from its initial, well-behaved state (the reference model $\pi_{\text{ref}}$, usually the SFT model).
 *   <font color='red'> This "not drastically changing" part is crucial</font>. It's where the idea of **KL Divergence** becomes central. In the original Reinforcement Learning from Human Feedback (RLHF) formulation, the objective is to maximize reward *while constraining the KL divergence between the policy $\pi_\theta$ and the reference policy $\pi_{\text{ref}}$*:
-    *   RLHF Objective (conceptual): $$\text{Maximize } E[\text{Reward}(y)]$ subject to $D_{KL}(\pi_\theta || \pi_{\text{ref}}) \le \beta_{KL}$$
+    *   RLHF Objective (conceptual): $$\text{Maximize } E[\text{Reward}(y)] \text{ subject to } D_{KL}(\pi_\theta || \pi_{\text{ref}}) \le \beta_{KL}$$
     *   <font color='red'>This KL constraint prevents "reward hacking" (where the model finds trivial solutions to get high reward while destroying its general language abilities) by keeping it close to </font> $\pi_{\text{ref}}$.
 
 
@@ -72,7 +72,12 @@ $$ D_{KL}(\pi_\theta || \pi_{\text{ref}}) = \sum_y \pi_\theta(y|x) \log\left(\fr
 ### 4. How the DPO/GRPO Loss Uses This KL-Related Term
 
 The DPO/GRPO loss is (for a single chosen $y_c$ and rejected $y_r$ for simplicity, GRPO averages this over multiple $y_r$):
-$$ \text{Loss} = -\log\left(\sigma\left( \beta_{DPO} \left[ (\log \pi_\theta(y_c|x) - \log \pi_{\text{ref}}(y_c|x)) - (\log \pi_\theta(y_r|x) - \log \pi_{\text{ref}}(y_r|x)) \right] \right)\right) $$
+$$
+\begin{aligned}
+\text{Loss} = -\log\Bigg(\sigma\Bigg( \beta_{DPO} \bigg[ & \left(\log \pi_\theta(y_c|x) - \log \pi_{\text{ref}}(y_c|x)\right) \\
+& - \left(\log \pi_\theta(y_r|x) - \log \pi_{\text{ref}}(y_r|x)\right) \bigg] \Bigg)\Bigg)
+\end{aligned}
+$$
 (where $\sigma$ denotes the sigmoid function)
 
 *   The terms $$(\log \pi_\theta(y|x) - \log \pi_{\text{ref}}(y|x))$$ are precisely these implicit reward estimates, derived from the logic connecting to KL-regularized RL.
@@ -88,7 +93,7 @@ $$ \text{Loss} = -\log\left(\sigma\left( \beta_{DPO} \left[ (\log \pi_\theta(y_c
     *   If $\pi_{\text{ref}}$ gives $y_r$ a high probability (i.e., the SFT model prefers the bad response), $\pi_\theta$ needs to work harder (increase its log-probability ratio for $y_c$ and decrease it for $y_r$) to satisfy the preference.
 3.  **Implicit KL Regularization:**
     *   The DPO/GRPO loss formulation implicitly optimizes for a reward model that explains the human preferences while ensuring the resulting policy $\pi_\theta$ doesn't stray too far (in terms of KL divergence) from the reference SFT policy $\pi_{\text{ref}}$.
-    *  <font color='red'>This regularization is key to stable and effective alignment</font>. If you just used a cross-entropy-like loss to maximize $P(y_{c})$ and minimize $P(y_r)$ without the $\pi_{\text{ref}}$ normalization, the model could easily overfit to the preference data and suffer from "catastrophic forgetting" of its general abilities 
+    *  <font color='red'>This regularization is key to stable and effective alignment</font>. If you just used a cross-entropy-like loss to maximize $P(y_{c})$ and minimize $P(y_r)$ without the $\pi_{\text{ref}}$ normalization, the model could easily overfit to the preference data and suffer from "catastrophic forgetting" of its general abilities
 
 ### In Essence:
 
@@ -151,7 +156,12 @@ Following [andrychowicz2020](https://arxiv.org/abs/2006.05990), we additionally 
 ### Appendix Loss function
 How did we get to this loss function?
 
-$$ \text{Loss} = -\log\left(\sigma\left( \beta_{DPO} \left[ (\log \pi_\theta(y_c|x) - \log \pi_{\text{ref}}(y_c|x)) - (\log \pi_\theta(y_r|x) - \log \pi_{\text{ref}}(y_r|x)) \right] \right)\right) $$
+$$
+\begin{aligned}
+\text{Loss} = -\log\Bigg(\sigma\Bigg( \beta_{DPO} \bigg[ & \left(\log \pi_\theta(y_c|x) - \log \pi_{\text{ref}}(y_c|x)\right) \\
+& - \left(\log \pi_\theta(y_r|x) - \log \pi_{\text{ref}}(y_r|x)\right) \bigg] \Bigg)\Bigg)
+\end{aligned}
+$$
 
 
 The derivation combines a few key ideas:
@@ -188,7 +198,7 @@ Where:
 
 The DPO paper shows (building on the optimal solution to KL-regularized RL) that the implicit reward can be related to the policy $\pi_\theta$ and the reference policy $\pi_{\text{ref}}$ as follows. The optimal policy $\pi^*$ is:
 
-$$ \pi^*(y|x) = \frac{1}{Z(x)} \pi_{\text{ref}}(y|x) \exp(\frac{1}{\beta_{DPO}} r(x,y)) $$
+$$ \pi^*(y|x) = \frac{1}{Z(x)} \pi_{\text{ref}}(y|x) \exp\left(\frac{1}{\beta_{DPO}} r(x,y)\right) $$
 
 Solving for $r(x,y)$:
 
@@ -235,7 +245,12 @@ $$ \text{Loss}_{\text{single\_pair}} = -\log P(y_{c} \succ y_{r} | x; \theta) $$
 
 Substituting the expression for $P(y\_c \succ y\_r | x; \theta)$ from Step 3:
 
-$$ \text{Loss}_{\text{single\_pair}} = -\log\left(\sigma\left( \beta_{DPO} \left[ (\log \pi_\theta(y_c|x) - \log \pi_{\text{ref}}(y_c|x)) - (\log \pi_\theta(y_r|x) - \log \pi_{\text{ref}}(y_r|x)) \right] \right)\right) $$
+$$
+\begin{aligned}
+\text{Loss}_{\text{single\_pair}} = -\log\Bigg(\sigma\Bigg( \beta_{DPO} \bigg[ & \left(\log \pi_\theta(y_c|x) - \log \pi_{\text{ref}}(y_c|x)\right) \\
+& - \left(\log \pi_\theta(y_r|x) - \log \pi_{\text{ref}}(y_r|x)\right) \bigg] \Bigg)\Bigg)
+\end{aligned}
+$$
 
 This is precisely the DPO loss function.
 
@@ -253,7 +268,13 @@ For GRPO, you would compute this loss for each $(y_c, y_{r_j})$ pair within a gr
 
 ## Putting everything together: GRPO in the DeepSeek paper
 
-$$J_{GRPO}(\theta) = \mathbb{E}_{q \sim P(Q), \{o_i\}_{i=1}^G \sim \pi_{\theta_{old}}(O|q)} \left[ \frac{1}{G} \sum_{i=1}^{G} \frac{1}{|o_i|} \sum_{t=1}^{|o_i|} \left( \min \left( \frac{\pi_\theta(o_{i,t}|q, o_{i,<t})}{\pi_{\theta_{old}}(o_{i,t}|q, o_{i,<t})} \hat{A}_{i,t}, \text{clip} \left( \frac{\pi_\theta(o_{i,t}|q, o_{i,<t})}{\pi_{\theta_{old}}(o_{i,t}|q, o_{i,<t})}, 1-\epsilon, 1+\epsilon \right) \hat{A}_{i,t} \right) \right) - \beta D_{KL}(\pi_\theta || \pi_{ref}) \right]$$
+$$
+\begin{aligned}
+J_{GRPO}(\theta) = \mathbb{E}_{q \sim P(Q), \{o_i\}_{i=1}^G \sim \pi_{\theta_{old}}(O|q)} \Bigg[ & \frac{1}{G} \sum_{i=1}^{G} \frac{1}{|o_i|} \sum_{t=1}^{|o_i|} \Bigg( \min \Bigg( \frac{\pi_\theta(o_{i,t}|q, o_{i,<t})}{\pi_{\theta_{old}}(o_{i,t}|q, o_{i,<t})} \hat{A}_{i,t}, \\
+& \text{clip} \left( \frac{\pi_\theta(o_{i,t}|q, o_{i,<t})}{\pi_{\theta_{old}}(o_{i,t}|q, o_{i,<t})}, 1-\epsilon, 1+\epsilon \right) \hat{A}_{i,t} \Bigg) \Bigg) \\
+& - \beta D_{KL}(\pi_\theta || \pi_{ref}) \Bigg]
+\end{aligned}
+$$
 
 Here's the dissection:
 
