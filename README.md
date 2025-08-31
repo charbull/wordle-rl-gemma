@@ -65,6 +65,12 @@ Checkout this [scripts/calculate_word_entropy_mlx.py](scripts/calculate_word_ent
 
 Those will be used later in our reward function.
 
+
+### Understanding Policy Optimization
+
+- [**Understanding Policy Optimization basics**](./docs/understanding_basics.ipynb): My personal notes documenting the core concepts behind Policy Optimization techniques.
+
+
 ## The Technology Stack: Why MLX?
 
 This project was developed entirely within the Apple Silicon ecosystem (initially M1, later M4 Pro). While PyTorch is a common choice, I switched to Apple's [MLX](https://ml-explore.github.io/mlx/build/html/index.html) framework for several key reasons:
@@ -243,9 +249,6 @@ This project provided several critical insights into training RL agents locally.
 4.  **A Data Curriculum is Crucial.** Training only on "Turn 1" prompts was ineffective. The breakthrough came from creating a curriculum with a **random history of 0-4 turns**. This exposed the model to a rich diversity of game states and dramatically accelerated learning.
 5.  **"Straight to RL" is a High-Wire Act.** Training with RL from a general-purpose base model (without a Supervised Fine-Tuning step) is possible but highly unstable and sensitive to hyperparameters. A slightly too-high learning rate caused a catastrophic **policy collapse**. For smaller models, an initial SFT phase is likely essential.
 6.  **Know Your Hardware's Hidden Bottlenecks.** A massive 8x slowdown was caused by the system running out of RAM and using **20 GB of memory swap**. A simple reboot fixed it. Furthermore, the `num_generations` parameter is extremely memory-intensive due to the **KV Cache**, as each parallel generation requires its own multi-gigabyte cache in memory.
-
-## Further Reading
-- [**Understanding Policy Optimization basics**](./docs/understanding_basics.ipynb): My personal notes documenting the core concepts behind Policy Optimization techniques.
 
 
 
