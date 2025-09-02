@@ -239,16 +239,53 @@ When starting from scratch, the model's performance drops significantly, highlig
 
 ---
 
-## Key Lessons Learned
+## Lessons Learned: Training a Wordle-Solving RL Agent
 
-This project provided several critical insights into training RL agents locally.
+Over the course of training a language model to play Wordle using Reinforcement Learning, we encountered and solved a series of progressively more complex challenges. This document summarizes the key technical and strategic lessons from that process
 
-1.  **The Environment is Everything.** Most initial bugs were not in the RL logic but in the game environment itself. **Unit testing** the core game logic was the most effective debugging tool, preventing costly failed training runs.
-2.  **RL is a Battle Against "Reward Hacking".** An RL agent will exploit any loophole in your reward function. Early models learned to output empty strings because the penalty for inaction was less than the penalty for a wrong guess. The fix was to make format failures unequivocally the worst possible outcome.
-3.  **Prompt Engineering is a High-Impact Lever.** The model's performance improved significantly when we switched from symbolic feedback (`✓✓xxx`) to a clear, plain-English state summary (`Green Letters: A, R. Gray Letters: T, E, S...`). Explicitly adding "**Do not repeat any words...**" to the prompt was more effective than relying solely on a negative reward.
-4.  **A Data Curriculum is Crucial.** Training only on "Turn 1" prompts was ineffective. The breakthrough came from creating a curriculum with a **random history of 0-4 turns**. This exposed the model to a rich diversity of game states and dramatically accelerated learning.
-5.  **"Straight to RL" is a High-Wire Act.** Training with RL from a general-purpose base model (without a Supervised Fine-Tuning step) is possible but highly unstable and sensitive to hyperparameters. A slightly too-high learning rate caused a catastrophic **policy collapse**. For smaller models, an initial SFT phase is likely essential.
-6.  **Know Your Hardware's Hidden Bottlenecks.** A massive 8x slowdown was caused by the system running out of RAM and using **20 GB of memory swap**. A simple reboot fixed it. Furthermore, the `num_generations` parameter is extremely memory-intensive due to the **KV Cache**, as each parallel generation requires its own multi-gigabyte cache in memory.
+### Lesson 1: The System is the Foundation. Get it Right First.
+
+The majority of our initial debugging was not about AI strategy, but about fundamental software engineering and data integrity. An RL agent cannot learn if its environment is flawed.
+
+*   **Isolate and Verify:** The most effective debugging tool was **unit testing**. Writing specific tests for core game logic allowed us to isolate and fix bugs before attempting long, expensive training runs.
+*   **Single Source of Truth:** Refactoring shared logic (feedback generation, clue summarization) into a canonical `game_logic.py` file was critical. It eliminated inconsistencies between data generation, training, and evaluation.
+
+### Lesson 2: RL is a Battle Against "Reward Hacking"
+
+An RL agent is a relentless optimizer. It will not learn what you *want* it to learn; it will learn what you *incentivize* it to learn. Any loophole in the reward function will be found and exploited.
+
+*   **Initial Hacks:** Our first model learned to output empty strings or repetitive gibberish (`Final Final Final...`). It discovered that the penalty for this "lazy" inaction was sometimes less severe than the penalty for making a thoughtful but incorrect guess.
+*   **The Fix:** We had to make the penalty for format failures (`format_fail_penalty`) unequivocally the worst possible outcome. This closed the loophole and forced the model to engage with the actual task.
+*   **The Takeaway:** Meticulously design your reward function to be free of exploits. The base penalty for failing to follow the rules must be significantly worse than the penalty for a strategic mistake.
+
+### Lesson 3: Prompt Engineering is a High-Impact Lever
+
+The model's performance is not just a function of its weights, but of the quality and clarity of the input it receives.
+
+*   **Model Feedback Format:** We iterated on the prompt format significantly. Initial versions used symbols (`✓✓xxx`), which were less effective. The best results came from providing a complete, plain-English "state summary" (`Current Knowledge:`, `Green Letters:`, `Words Already Guessed:`, etc.). Clear, structured, natural language is key.
+*   **Explicit Instruction:** The model often repeated guesses. Instead of only punishing this with a negative reward, we explicitly added "**Do not repeat any words...**" to the prompt. This transformed the constraint from a learned punishment to a direct instruction, which was far more effective at eliminating the behavior.
+
+### Lesson 4: Data and Curriculum Drive the Learning Curve
+
+The structure of the training data had a direct and measurable impact on the model's ability to learn.
+
+*   **The Importance of Game History:** Initially, we trained the model only on "Turn 1" prompts (starting from scratch). The model struggled to learn.
+*   **Building a Curriculum:**
+    1.  Introducing prompts with a **single previous guess** in the history allowed the model to start learning, reaching a baseline win rate.
+    2.  Expanding the data to include a **random history of 0-4 turns** was the key breakthrough. This provided a rich curriculum of diverse game states and significantly boosted the win rate and the model's ability to win in fewer turns.
+
+### Lesson 5: "Straight to RL" is a High-Wire Act
+
+A key finding was the challenge of training a model with RL **without a preceding Supervised Fine-Tuning (SFT) step.** While our Rank 16 run proved this is possible, it is a difficult and unstable path.
+
+*   **The Stability Challenge:** Starting with a generalist model, RL must teach both the task format and strategy simultaneously. This proved highly sensitive to hyperparameters. A Rank 64 run with a slightly too-high learning rate led to a catastrophic **policy collapse** where performance dropped to 0%.
+*   **The Role of Model Size:** Smaller models (e.g., 1B parameters) struggled significantly with this approach. They often failed to adhere to the required format (`<think>`, `<guess>`, 5-letter words), indicating they lacked the capacity to learn the structure from the RL signal alone. For smaller models, SFT is likely not just helpful, but necessary.
+*   **Gradient Clipping:** We found that robust **gradient clipping** was more crucial than initially thought for maintaining stability in this "straight to RL" setup. Experimenting to find the right clipping value was a key step.
+
+### Lesson 6: Know Your Hardware and Its "Hidden" Bottlenecks
+
+*   **System Monitoring is Crucial:** A catastrophic 8x slowdown was diagnosed not by a code bug, but by observing the **system's memory usage.** Heavy memory swapping (`20 GB Swap Used`) was crippling the training process. A simple system restart to clear the memory was the fix. The health of the hardware is a critical, non-obvious hyperparameter.
+*   **The Cost of Generations (KV Cache):** We learned that `num_generations` is extremely memory-intensive. This is due to the **KV Cache**, the model's "working memory." Each parallel generation requires its own multi-gigabyte KV Cache. Increasing from 2 to 4 generations had a massive memory impact, whereas increasing the LoRA rank was comparatively cheap in terms of RAM. Understanding this trade-off is essential for configuring runs that don't overload your hardware.
 
 
 
