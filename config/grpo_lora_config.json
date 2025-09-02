@@ -3,14 +3,14 @@
         "name": "mlx-community/gemma-3-4b-it-bf16"
     },
     "training": {
-       "iterations": 500,
-        "learning_rate": 1e-6,
+        "iterations": 500,
+        "learning_rate": 1e-06,
         "use_lr_scheduler": true,
-        "lr_min": 1e-7,
+        "lr_min": 1e-07,
         "lr_decay_steps": 500,
-        "checkpoint_steps": 50,
         "batch_size": 16,
         "log_steps": 20,
+        "checkpoint_steps": 50,
         "resume_from_checkpoint": "",
         "config_file": "grpo_lora_config.json",
         "data_path": "data/wordle_cot_data_rl.jsonl",
@@ -18,9 +18,9 @@
         "use_early_stopping": true
     },
     "lora": {
-         "rank": 128,             
-        "alpha": 32.0,         
-        "dropout": 0.05,        
+        "rank": 64,
+        "alpha": 128.0,
+        "dropout": 0.05,
         "layers_to_tune": 33
     },
     "evaluation": {
@@ -28,36 +28,32 @@
         "samples": 25
     },
     "rl": {
-        "num_generations": 4,
-        "max_completion_length": 128,
+        "num_generations": 2,
+        "max_completion_length": 512,
         "sampling_temperature": 0.9,
         "max_trials": 6
     },
     "grpo": {
         "clip_epsilon": 1.0,
         "ref_update_steps": 50,
-        "beta": 0.1,
-        "kl_coeff": 0.05
+        "kl_coeff": 0.05,
+        "beta": 0.1
     },
     "reward": {
         "solution_correct_guess": 150.0,
-        "valid_guess_base": 15.0,           
-
+        "valid_guess_base": 15.0,
         "information_gain_bonus_coeff": 7.5,
-        "new_letter_bonus": 2.0,            
+        "new_letter_bonus": 2.0,
         "possibility_reduction_bonus": 15.0,
-
         "length_penalty_per_token": 0.01,
         "time_penalty_per_guess": 1.0,
-
-        "gray_letter_penalty": 20.0, 
+        "gray_letter_penalty": 20.0,
         "yellow_letter_penalty": 20.0,
         "green_position_penalty": 30.0,
-        "green_reuse_penalty": 3.0,       
-        "yellow_reuse_penalty": 1.5,      
-
+        "green_reuse_penalty": 3.0,
+        "yellow_reuse_penalty": 1.5,
         "repetition_penalty": 40.0,
         "not_in_dictionary_penalty": 35.0,
         "format_fail_penalty": 200.0
-   }
+    }
 }
