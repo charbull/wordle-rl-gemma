@@ -70,6 +70,10 @@ class GSPOConfig:
     clip_epsilon: float = 0.0004
     # Small value to add to the standard deviation denominator for numerical stability.
     advantage_epsilon: float = 1e-8
+    # micro batch size to keep the tensor small and avoid crashing
+    micro_batch_size: int = 4
+    # after how many steps update the reference model
+    ref_update_steps: int = 50
 
 @dataclass
 class EvalConfig:

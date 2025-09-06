@@ -28,7 +28,7 @@ from src.wordle import rewards
 from src.utils.logging import log_game_result, write_metrics_to_file, log_metrics_to_tensorboard, truncate_jsonl_log, plot_training_curves, plot_cumulative_wins
 
 # ==============================================================================
-# ---  HELPER FUNCTIONS (Consolidated here) ---
+# ---  HELPER FUNCTIONS ---
 # ==============================================================================
 
 def from_trainable_parameters(model_instance: nn.Module, trainable_params: dict):
@@ -164,6 +164,8 @@ class BaseTrainer(abc.ABC):
         self.ref_model, _ = load(self.config.model.name)
 
         self.policy_model = lora.apply_lora_to_model(self.policy_model, self.config.lora)
+         # Also apply LoRA structure to the reference model so they match
+        self.ref_model = lora.apply_lora_to_model(self.ref_model, self.config.lora)
         
         if self.config.training.resume_from_checkpoint:
             print(f"Loading adapter weights from {self.config.training.resume_from_checkpoint}")
@@ -191,7 +193,6 @@ class BaseTrainer(abc.ABC):
         self.optimizer = optim.AdamW(learning_rate=self.config.training.learning_rate)
 
     def _apply_gradients(self, accumulated_grads: Dict[str, mx.array]):
-        # This is the proven-working update logic from your original rl_trainer.py
         if self.config.training.use_lr_scheduler:
             new_lr = cosine_decay_lr(self.step_counter, self.config.training.learning_rate, self.config.training.lr_min, self.config.training.lr_decay_steps)
             self.optimizer.learning_rate = new_lr
@@ -203,7 +204,6 @@ class BaseTrainer(abc.ABC):
         updated_params = self.optimizer.apply_gradients(clipped_grads_dict, self.trainable_params)
         self.policy_model.update(tree_unflatten(list(updated_params.items())))
         
-        # This is the original, working line for state management
         self.trainable_params = updated_params
         
         mx.eval(self.policy_model.parameters(), self.optimizer.state)
@@ -230,7 +230,6 @@ class BaseTrainer(abc.ABC):
 
         for self.step_counter in pbar:
             sample = next(data_iterator)
-            # Sampler must be created inside the loop if it has state (it doesn't, but this is safer)
             sampler = make_sampler(
                 temp=self.config.rl.sampling_temperature,
             )
@@ -266,6 +265,14 @@ class BaseTrainer(abc.ABC):
             if self.step_counter > 0 and self.step_counter % self.config.training.checkpoint_steps == 0:
                 checkpoint_file = self.adapter_dir / f"adapter_step_{self.step_counter}.npz"
                 lora.save_checkpoint(model=self.policy_model, checkpoint_file=str(checkpoint_file))
+
+            ref_update_steps = self.config.gspo.ref_update_steps
+            if ref_update_steps and self.step_counter > 0 and self.step_counter % ref_update_steps == 0:
+                print(f"\n--- Updating reference model at step {self.step_counter} ---")
+                # Both models have the same (LoRA) structure, we can do a direct update.
+                # This copies the trained LoRA weights.
+                self.ref_model.update(self.policy_model.parameters())
+                print("Reference model updated successfully.")
 
         if training_game_outcomes:
             write_metrics_to_file(training_game_outcomes, self.metrics_file_path)
