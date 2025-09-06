@@ -50,6 +50,11 @@ sudo purge
 ## Run training
 ```sh
 python -m scripts.train_gemma_rl --config ./config/grpo_lora_config.json
+
+python -m scripts.run_training --config ./config/gxpo_lora_config.json --algo gspo
+
+python -m scripts.run_training --config ./config/grpo_lora_config.json --algo grpo
+
 ```
 
 ## Plot the cumulative wins during training
