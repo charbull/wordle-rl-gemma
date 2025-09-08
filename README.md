@@ -6,6 +6,13 @@ This project is an exploration into training a Large Language Model (**Gemma-3 4
 
 The primary goals were to gain hands-on experience with RL, understand the challenges and hardware constraints of local training, and compare RL techniques to traditional Supervised Fine-Tuning (SFT).
 
+This is not an officially supported Google product. This project is not
+eligible for the [Google Open Source Software Vulnerability Rewards
+Program](https://bughunters.google.com/open-source-security).
+
+This project is intended for demonstration purposes only. It is not
+intended for use in a production environment.
+
 ## Table of Contents
 - [Why Wordle? The RL Challenge](#why-wordle-the-rl-challenge)
 - [The Technology Stack: Why MLX?](#the-technology-stack-why-mlx)
