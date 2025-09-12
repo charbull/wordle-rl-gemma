@@ -53,13 +53,13 @@ python -m scripts.train_gemma_rl --config ./config/grpo_lora_config.json
 
 python -m scripts.run_training --config ./config/gxpo_lora_config.json --algo gspo
 
-python -m scripts.run_training --config ./config/grpo_lora_config.json --algo grpo
+python -m scripts.run_training --config ./config/gxpo_lora_config.json --algo grpo
 
 ```
 
 ## Plot the cumulative wins during training
 ```sh
-python -m scripts.plot_cumulative_wins --file ./logs/rl_wordle_metrics_20250819-074356.jsonl
+python -m scripts.plot_cumulative_wins --file ./experiments/20250908-212927_gemma-3-4b-it-bf16_rank64/training_metrics.jsonl
 ```
 
 ## Run unit tests

@@ -65,7 +65,7 @@ class GSPOTrainer(BaseTrainer):
             self, game_rollout: GameRecord
         ):
             """
-            Computes GSPO loss with full-rollout advantage normalization and memory-safe
+            Computes GSPO loss with a binary preference advantage signal and memory-safe
             micro-batching for the gradient calculation.
             """
             all_attempts = game_rollout.attempts
@@ -73,15 +73,31 @@ class GSPOTrainer(BaseTrainer):
                 print("Skipping step: Not enough attempts for a stable loss calculation.")
                 return -1.0, None
 
-            # 1. Advantage Normalization (Full Rollout)
-            # Calculate advantages on the entire game's data for statistical stability.
-            rewards_list = [att.training_reward for att in all_attempts]
-            rewards_mx = mx.array(rewards_list)
-            mean_reward = mx.mean(rewards_mx)
-            std_reward = mx.std(rewards_mx)
-            advantages = (rewards_mx - mean_reward) / (std_reward + self.config.gspo.advantage_epsilon)
+            if game_rollout.solved:
+                # Hybrid Binary Preference Advantage ---
+                # 1. Find the maximum reward achieved in the game rollout.
+                if not all_attempts:
+                    print("Skipping step: No attempts in rollout.")
+                    return -1.0, None
 
-            # 2. Micro-batch Gradient Calculation
+                # This finds the single best reward value from all attempts
+                max_reward = max(att.training_reward for att in all_attempts)
+
+                # 2. Create binary advantages: +1.0 for all winners, -1.0 for all losers.
+                # handle any ties for the best move.
+                advantages_list = []
+                for att in all_attempts:
+                    if att.training_reward == max_reward:
+                        advantages_list.append(1.0)  # Positive advantage for ALL best moves
+                    else:
+                        advantages_list.append(-1.0) # Negative advantage for all other moves
+            else:
+                # If the game was lost or ended early, ALL actions were part of a failing strategy.
+                advantages_list = [-1.0] * len(all_attempts)
+
+            advantages = mx.array(advantages_list)
+
+            # 3. Micro-batch Gradient Calculation
             # Now, process the gradients in small, memory-safe chunks.
             micro_batch_size = self.config.gspo.micro_batch_size
             # zeroed out grads ready to accumulate the gradients from each micro-batch.
@@ -123,7 +139,7 @@ class GSPOTrainer(BaseTrainer):
                 total_loss += loss.item()
                 num_micro_batches += 1
 
-            # 3. Final Averaging
+            # 4. Final Averaging
             if num_micro_batches > 0:
                 avg_grads = {k: v / num_micro_batches for k, v in accumulated_grads.items()}
                 avg_loss = total_loss / num_micro_batches

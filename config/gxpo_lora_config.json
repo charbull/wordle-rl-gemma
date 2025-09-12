@@ -4,7 +4,7 @@
     },
     "training": {
         "iterations": 500,
-        "learning_rate": 2e-07,
+        "learning_rate": 5e-06,
         "use_lr_scheduler": true,
         "lr_min": 1e-07,
         "lr_decay_steps": 500,
@@ -12,7 +12,7 @@
         "log_steps": 20,
         "checkpoint_steps": 50,
         "resume_from_checkpoint": "",
-        "config_file": "grpo_lora_config.json",
+        "config_file": "gxpo_lora_config.json",
         "data_path": "data/wordle_cot_data_rl.jsonl",
         "early_stopping_patience": 10,
         "use_early_stopping": true,
@@ -36,9 +36,9 @@
         "max_trials": 6
     },
     "grpo": {
-        "clip_epsilon": 1.0,
+        "clip_epsilon": 0.2,
         "ref_update_steps": 50,
-        "kl_coeff": 0.05,
+        "kl_coeff": 0.04,
         "beta": 0.1
     },
     "reward": {

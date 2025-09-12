@@ -112,7 +112,6 @@ def reward_for_possibility_reduction(
     
     return reduction_fraction * config.reward.get("possibility_reduction_bonus", 10.0)
 
-
 def calculate_total_reward(
     response: str,
     secret_word: str,
@@ -121,130 +120,93 @@ def calculate_total_reward(
     allowed_words: set,
     tokenizer = None,
     print_debug: bool = False
-) -> tuple[float, float]: # Return a tuple of (game_score, training_reward)
+) -> tuple[float, float]:
     """
     Calculates a training_reward and a game score for a given model response.
-    - Prioritizes winning.
+    - Guarantees a win is always the highest, positive reward.
     - Penalizes invalid/repeated guesses.
-    - Applies penalties for violating known clues.
-    - Rewards valid, consistent guesses with a base reward and an entropy.
-    - Applies a small time penalty to every guess to encourage efficiency.
-
-    Args:
-        response: The full text response from the model (after the prompt).
-        secret_word: The secret word to be guessed in this game.
-        past_feedback: List of GuessFeedback objects representing previous guesses and feedback.
-        config: The TrainerConfig containing reward parameters.
-        allowed_words: Set of valid 5-letter words for guesses.
-        tokenizer: The tokenizer to calculate length penalties.
-        print_debug: If True, prints detailed debug information about the reward calculation.
-    Returns:
-        A tuple of (game_score, training_reward). The game_score is based solely on the guess quality, 
-            the training_reward includes time and length penalties for the loss function.
+    - Applies strategic penalties ONLY to non-winning, valid guesses.
     """
     reward_config = config.reward
     guess = parse_guess(response)
-    # we want the model to win in the fewest guesses possible
+
+    # 1. Handle terminal conditions first: WINNING IS THE TOP PRIORITY
+    if guess == secret_word.upper():
+        win_score = reward_config.get("solution_correct_guess")
+        
+        # Make the reward slightly higher for faster wins
+        win_score -= len(past_feedback) * reward_config.get("time_penalty_per_guess")
+        
+        # Apply a small penalty for long reasoning text to encourage conciseness
+        length_penalty = 0.0
+        if tokenizer and response:
+            length_penalty = -(len(tokenizer.encode(response)) * reward_config.get("length_penalty_per_token"))
+
+        return win_score, win_score + length_penalty
+
+    # 2. Handle clear rule violations with large, fixed penalties
+    if not guess:
+        game_score = -reward_config.get("format_fail_penalty")
+        return game_score, game_score
+    
+    if any(fb.guess == guess for fb in past_feedback):
+        game_score = -reward_config.get("repetition_penalty")
+        return game_score, game_score
+
+
+    # --- for non-winning, valid guesses ---
     time_penalty = -reward_config.get("time_penalty_per_guess")
-    # we want the model to be concise in the reasoning
     length_penalty = 0.0
     if tokenizer and response:
         length_penalty = -(len(tokenizer.encode(response)) * reward_config.get("length_penalty_per_token"))
 
-    # Handle Game Rule Violations
-    if not guess:
-        # This ensures that a short, empty response is not rewarded over a
-        # long but incorrect attempt. 
-        # avoid reward hacking by returning a very negative score
-        game_score = -reward_config.get("format_fail_penalty")
-        training_reward = game_score + time_penalty + length_penalty    
-        return game_score, training_reward
-    
-    if guess == secret_word.upper():
-        game_score = reward_config.get("solution_correct_guess")
-        return game_score, game_score + time_penalty + length_penalty
-        
-    if any(fb.guess == guess for fb in past_feedback):
-        game_score = -reward_config.get("repetition_penalty")
-        return game_score, game_score + time_penalty + length_penalty
-
-    # Build a correct, consistent clue state from history.
-    known_green = {}  # {index: letter}
-    # Use a Counter for yellow letters to handle duplicates
+    # Build a correct, consistent clue state from history...
+    known_green = {}
     known_yellow = Counter()
     known_gray = set()
 
     for fb in past_feedback:
         guess_letters = list(fb.guess)
         feedback_chars = fb.feedback.split()
-        
-        # This counter tracks letters that are green or yellow in this specific turn
         counts_in_secret_this_turn = Counter()
-
-        # Identify all Green and Yellow letters
         for i in range(5):
             letter = guess_letters[i]
             if feedback_chars[i] in ('G', 'Y'):
                 counts_in_secret_this_turn[letter] += 1
-        
-        # Update the global minimum required count for yellow letters
         for letter, count in counts_in_secret_this_turn.items():
             known_yellow[letter] = max(known_yellow[letter], count)
-
-        # Process all clues to update the global state
         for i in range(5):
             letter = guess_letters[i]
             feedback = feedback_chars[i]
-
             if feedback == 'G':
                 known_green[i] = letter
             elif feedback == 'X':
-                # A letter is only truly gray if it wasn't found as Green or Yellow
-                # anywhere in this guess.
                 if counts_in_secret_this_turn[letter] == 0:
                     known_gray.add(letter)
 
-    # A letter that is confirmed Green is the highest truth. It cannot also be
-    # considered a yellow or gray constraint.
     green_letters = set(known_green.values())
     for letter in green_letters:
         if letter in known_yellow:
-            del known_yellow[letter] # No longer a 'yellow' constraint
+            del known_yellow[letter]
         if letter in known_gray:
-            known_gray.remove(letter) # Cannot be gray if it's green
+            known_gray.remove(letter)
 
-    # Calculate violations based on the clean, final clue state.
-    green_violations = 0
-    for idx, correct_letter in known_green.items():
-        if guess[idx] != correct_letter:
-            green_violations += 1
-
-    yellow_violations = 0
+    green_violations = sum(1 for idx, correct_letter in known_green.items() if guess[idx] != correct_letter)
     guess_counts = Counter(guess)
-    # Check if the guess has at least the required number of each yellow letter
-    for yellow_letter, required_count in known_yellow.items():
-        if guess_counts[yellow_letter] < required_count:
-            yellow_violations += 1
-            
-    gray_violations = 0
-    # Iterate over unique letters to avoid double-penalizing
-    for letter_in_guess in set(guess):
-        if letter_in_guess in known_gray:
-            gray_violations += 1
+    yellow_violations = sum(1 for yellow_letter, required_count in known_yellow.items() if guess_counts[yellow_letter] < required_count)
+    gray_violations = sum(1 for letter_in_guess in set(guess) if letter_in_guess in known_gray)
 
-    # 4. Calculate total penalty from violations.
     total_penalty = 0.0
     total_penalty += green_violations * reward_config.get("green_position_penalty")
     total_penalty += yellow_violations * reward_config.get("yellow_letter_penalty")
     total_penalty += gray_violations * reward_config.get("gray_letter_penalty")
 
-    # 5. Add soft penalty for out-of-dictionary words.
     if not is_valid_guess(guess, allowed_words):
         total_penalty += reward_config.get("not_in_dictionary_penalty", 25.0)
 
-    # 6. Calculate potential score.
     stagnation_penalty = calculate_stagnation_penalty(guess, known_green, known_yellow, config)
     total_penalty += stagnation_penalty
+    
     strategic_bonus = get_strategic_bonus(guess, past_feedback, config)
     potential_score = reward_config.get("valid_guess_base") + strategic_bonus
     
@@ -252,7 +214,6 @@ def calculate_total_reward(
     reduction_bonus = reward_for_possibility_reduction(past_feedback, current_feedback, config)
     potential_score += reduction_bonus
 
-    # 7. Calculate final scores.
     game_score = potential_score - total_penalty
     training_reward = game_score + time_penalty + length_penalty
     
@@ -264,5 +225,3 @@ def calculate_total_reward(
         print(f"--------------------")
         
     return game_score, training_reward
-
-
