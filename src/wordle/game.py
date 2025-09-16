@@ -243,15 +243,17 @@ def get_feedback(guess: str, secret_word: str) -> GuessFeedback:
 def parse_guess(response: str) -> str:
     """
     A parser that finds the last 5-letter ALL CAPS word inside the <guess> tags.
-    This prevents the model from being rewarded for "thinking out loud" inside the tags.
+    This version is more robust to handle malformed or incomplete closing tags.
     """
-    match = GUESS_TAG_RE.search(response)
+    # Use a more lenient regex to find content starting with <guess>
+    # and ending with either </guess> or the end of the string.
+    match = re.search(r"<guess>(.*?)(?:</guess>|$)", response, re.DOTALL)
     if not match:
         return None
 
     # Get the original content without changing its case.
     content_inside_tags = match.group(1)
-    
+
     # Use the regex to find all 5-letter ALL CAPS words.
     five_letter_words = FIVE_LETTER_WORD_RE.findall(content_inside_tags)
 
@@ -259,7 +261,7 @@ def parse_guess(response: str) -> str:
     if five_letter_words:
         # The result is already uppercase, so just return it.
         return five_letter_words[-1]
-    
+
     # Otherwise, no validly formatted guess was found.
     return None
 

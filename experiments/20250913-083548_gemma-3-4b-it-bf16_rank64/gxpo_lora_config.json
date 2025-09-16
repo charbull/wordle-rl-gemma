@@ -4,7 +4,7 @@
     },
     "training": {
         "iterations": 500,
-        "learning_rate": 1e-06,
+        "learning_rate": 2e-08,
         "use_lr_scheduler": true,
         "lr_min": 1e-07,
         "lr_decay_steps": 500,
@@ -13,7 +13,7 @@
         "log_steps": 20,
         "checkpoint_steps": 50,
         "resume_from_checkpoint": "",
-        "config_file": "grpo_lora_config.json",
+        "config_file": "gxpo_lora_config.json",
         "data_path": "data/wordle_cot_data_rl.jsonl",
         "early_stopping_patience": 10,
         "use_early_stopping": true
@@ -30,20 +30,21 @@
     },
     "rl": {
         "num_generations": 2,
-        "max_completion_length": 256,
+        "max_completion_length": 512,
         "sampling_temperature": 0.9,
         "max_trials": 6
     },
     "grpo": {
-        "clip_epsilon": 1.0,
+        "clip_epsilon": 0.2,
         "ref_update_steps": 50,
-        "kl_coeff": 0.05,
+        "kl_coeff": 0.04,
         "beta": 0.1
     },
     "gspo": {
         "clip_epsilon": 0.0004,
         "advantage_epsilon": 1e-08,
-        "micro_batch_size": 4
+        "micro_batch_size": 4,
+        "ref_update_steps": 15
     },
     "reward": {
         "solution_correct_guess": 150.0,
