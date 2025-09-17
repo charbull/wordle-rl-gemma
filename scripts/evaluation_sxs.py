@@ -101,7 +101,7 @@ def play_side_by_side(training_config_path: str, lora_adapter_path, metrics_file
 
 if __name__ == "__main__":
     LORA_CONFIG_FILE_PATH = "./experiments/20250913-083548_gemma-3-4b-it-bf16_rank64/gxpo_lora_config.json"
-    LORA_ADAPTER_PATH = "./experiments/20250913-083548_gemma-3-4b-it-bf16_rank64/adapters/adapter_step_500.npz"
+    LORA_ADAPTER_PATH = "./experiments/20250913-083548_gemma-3-4b-it-bf16_rank64/adapters/adapter_step_300.npz"
 
     NUM_SAMPLES = 150
     LOG_INTERVAL = 10

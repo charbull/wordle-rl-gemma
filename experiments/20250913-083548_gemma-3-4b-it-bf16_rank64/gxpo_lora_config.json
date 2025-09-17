@@ -12,7 +12,7 @@
         "batch_size": 16,
         "log_steps": 20,
         "checkpoint_steps": 50,
-        "resume_from_checkpoint": "",
+        "resume_from_checkpoint": "./experiments/20250913-083548_gemma-3-4b-it-bf16_rank64/adapters/adapter_step_300.npz",
         "config_file": "gxpo_lora_config.json",
         "data_path": "data/wordle_cot_data_rl.jsonl",
         "early_stopping_patience": 10,
