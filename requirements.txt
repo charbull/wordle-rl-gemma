@@ -1,5 +1,5 @@
 mlx>=0.26.1
-mlx-lm>=0.25.2
+mlx-lm>=v0.28.0
 matplotlib
 numpy
 huggingface_hub

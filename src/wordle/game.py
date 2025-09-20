@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from typing import List
 import re
 from collections import Counter
-from mlx_lm import generate
+from mlx_lm import batch_generate
 from typing import Callable, Dict, Optional
 import json
 from datasets import Dataset
@@ -422,18 +422,21 @@ def play_wordle_game(
         messages = format_prompt_for_model(past_feedback, system_prompt)
         if print_debug:
             print(f"Prompt sent to model:\n{messages[-1]['content']}")
+        # The prompt is identical for all generations within this single turn
         prompt_string = tokenizer.apply_chat_template(
             messages, tokenize=False, add_generation_prompt=True)
         prompt_tokens = tokenizer.encode(prompt_string)
+        prompts_for_batch = [prompt_tokens] * num_generations
 
-        # Generate N parallel responses from the current state of the model.
-        # TODO: Consider batching these generations when MLX supports it.
-        generations = [
-            generate(
-                model, tokenizer, prompt=prompt_string,
-                max_tokens=config.rl.max_completion_length, sampler=sampler, verbose=False
-            ) for _ in range(num_generations)
-        ]
+        # Use batch_generate for a single, parallelized inference call
+        batch_response = batch_generate(
+            model=model,
+            tokenizer=tokenizer,
+            prompts=prompts_for_batch,
+            max_tokens=config.rl.max_completion_length,
+            sampler=sampler,
+        )
+        generations = batch_response.texts
 
         # Process each generation to extract the guess and calculate the reward.
         current_turn_attempts: List[GenerationAttempt] = []
