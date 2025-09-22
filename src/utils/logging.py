@@ -28,7 +28,7 @@ def plot_training_curves(
     ax1.set_ylabel("Loss")
     ax1.legend(loc='upper left')
     ax1.grid(True)
-    ax1.set_title(f"Training and Evaluation Curves ({timestamp})")
+    ax1.set_title(f"Training and Evaluation Curves")
 
     # Panel 2: Rewards and Win Rate
     ax2.plot(train_steps, train_avg_rewards, label="Avg. Training Reward", color='tab:green')
