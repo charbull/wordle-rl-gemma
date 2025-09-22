@@ -100,8 +100,8 @@ def play_side_by_side(training_config_path: str, lora_adapter_path, metrics_file
 
 
 if __name__ == "__main__":
-    LORA_CONFIG_FILE_PATH = "/Users/charbelk/dev/wordle-rl-gemma/experiments/20250824-133827_gemma-3-4b-it-bf16_rank64/grpo_lora_config.json"
-    LORA_ADAPTER_PATH = "/Users/charbelk/dev/wordle-rl-gemma/experiments/20250824-133827_gemma-3-4b-it-bf16_rank64/adapters/adapter_step_500.npz"
+    LORA_CONFIG_FILE_PATH = "/Users/charbelk/dev/wordle-rl-gemma/experiments/20250920-123749_SmolLM3-3B-bf16_rank64/grpo_lora_config.json"
+    LORA_ADAPTER_PATH = "/Users/charbelk/dev/wordle-rl-gemma/experiments/20250920-123749_SmolLM3-3B-bf16_rank64/adapters/adapter_step_500.npz"
 
     NUM_SAMPLES = 150
     LOG_INTERVAL = 10
