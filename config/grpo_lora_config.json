@@ -1,6 +1,6 @@
 {
     "model": {
-        "name": "mlx-community/gemma-3-4b-it-bf16"
+        "name": "mlx-community/Qwen3-4B-bf16"
     },
     "training": {
         "iterations": 500,
@@ -9,7 +9,7 @@
         "lr_min": 1e-07,
         "lr_decay_steps": 500,
         "batch_size": 16,
-        "log_steps": 20,
+        "log_steps": 10,
         "checkpoint_steps": 50,
         "resume_from_checkpoint": "",
         "config_file": "grpo_lora_config.json",
