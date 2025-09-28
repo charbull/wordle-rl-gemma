@@ -1,5 +1,5 @@
-mlx>=0.28.1
-mlx-lm>=0.29.2
+mlx>=0.29.2
+mlx-lm>=0.28.1
 matplotlib
 numpy
 huggingface_hub
