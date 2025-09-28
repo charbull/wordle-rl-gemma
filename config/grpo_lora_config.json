@@ -1,6 +1,6 @@
 {
     "model": {
-        "name": "nightmedia/Qwen3-4B-Thinking-2507-bf16-mlx"
+        "name": "mlx-community/gemma-3-4b-it-bf16"
     },
     "training": {
         "iterations": 500,
