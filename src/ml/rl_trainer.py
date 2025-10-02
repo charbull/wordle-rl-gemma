@@ -360,8 +360,6 @@ def train(config: cfg.TrainerConfig, system_prompt: str):
     win_tracker = deque(maxlen=config.training.iterations)
 
     # In GRPO, the 'reference model' is a frozen copy of the original model.
-    # It does NOT get updated during training.
-    # TODO: consider updating the reference model periodically every x steps.
     print("Creating policy and reference models...")
     policy_model, tokenizer = load(config.model.name)
     ref_model, _ = load(config.model.name)
@@ -419,6 +417,12 @@ def train(config: cfg.TrainerConfig, system_prompt: str):
                 total=config.training.iterations,
                 initial=start_step)
 
+    batch_size = config.training.batch_size
+    batch_accumulated_grads = {k: mx.zeros_like(v) for k, v in trainable_params.items()}
+    batch_total_loss = 0.0
+    batch_num_micro_batches = 0
+    update_step_counter = 0
+
     for step_counter in pbar:
         sample = next(data_iterator)
         game_rollout = play_wordle_game(
@@ -430,23 +434,24 @@ def train(config: cfg.TrainerConfig, system_prompt: str):
         
         win_tracker.append(1 if game_rollout.solved else 0)
         rolling_win_rate = (sum(win_tracker) / len(win_tracker)) * 100 if win_tracker else 0.0
-        if not game_rollout.attempts:
-            print("\n⚠️ Warning: Game rollout produced no attempts. This step will have no loss/gradient update. ⚠️")
+        if not game_rollout.turns:
+            print("\n⚠️ Warning: Game rollout produced no turns. This step will have no loss/gradient update. ⚠️")
 
-        all_rewards = [att.training_reward for att in game_rollout.attempts]
+        all_rewards = [
+            att.training_reward
+            for turn in game_rollout.turns
+            for att in turn.attempts
+        ]
         avg_reward_this_step = sum(all_rewards) / len(all_rewards) if all_rewards else 0.0
 
-        # Group attempts by their prompt string to prompt
-        grouped_attempts = defaultdict(list)
-        for attempt in game_rollout.attempts:
-            grouped_attempts[attempt.prompt_string].append(attempt)
-
-        accumulated_grads = {k: mx.zeros_like(v) for k, v in trainable_params.items()}
-        total_loss = 0.0
-        num_micro_batches = 0
+        # In-step (per-rollout) accumulation
+        rollout_accumulated_grads = {k: mx.zeros_like(v) for k, v in trainable_params.items()}
+        rollout_total_loss = 0.0
+        rollout_num_micro_batches = 0
 
         # prepare all (winner, loser) pairs and compute gradients
-        for _, attempts_for_prompt in grouped_attempts.items():
+        for turn in game_rollout.turns:
+            attempts_for_prompt = turn.attempts
             # Need at least one winner and one loser for a comparison
             if len(attempts_for_prompt) < 2:
                 continue
@@ -460,7 +465,7 @@ def train(config: cfg.TrainerConfig, system_prompt: str):
                 if loser is not winner:
                     winner_toks_list.append(winner.response_tokens)
                     loser_toks_list.append(loser.response_tokens)
-                    prompt_toks_list.append(winner.prompt_tokens)
+                    prompt_toks_list.append(turn.prompt_tokens)
             
             if not loser_toks_list:
                 continue
@@ -487,19 +492,30 @@ def train(config: cfg.TrainerConfig, system_prompt: str):
                 continue
 
             for key, grad_val in micro_grads.items():
-                accumulated_grads[key] += grad_val
+                rollout_accumulated_grads[key] += grad_val
 
-            total_loss += loss.item()
-            num_micro_batches += 1
+            rollout_total_loss += loss.item()
+            rollout_num_micro_batches += 1
         
         # After processing all prompts in this step, average gradients and apply update when we have valid micro-batches 
-        if num_micro_batches > 0:
+        avg_rollout_loss = -1.0
+        if rollout_num_micro_batches > 0:
+            avg_rollout_loss = rollout_total_loss / rollout_num_micro_batches
+            # Add this rollout's gradients to the batch accumulators
+            for key, grad_val in rollout_accumulated_grads.items():
+                batch_accumulated_grads[key] += grad_val
+            batch_total_loss += rollout_total_loss
+            batch_num_micro_batches += rollout_num_micro_batches
 
+        # Perform a model update step after accumulating a full batch of rollouts
+        logged_loss = -1.0
+        if step_counter > 0 and step_counter % batch_size == 0 and batch_num_micro_batches > 0:
+            update_step_counter += 1
             ## LR Decay
             if config.training.use_lr_scheduler:
                 # Calculate the new learning rate for the current step
                 new_lr = cosine_decay_lr(
-                                step=step_counter,
+                                step=update_step_counter,
                                 initial_lr=config.training.learning_rate,
                                 min_lr=config.training.lr_min,
                                 decay_steps=config.training.lr_decay_steps
@@ -507,27 +523,32 @@ def train(config: cfg.TrainerConfig, system_prompt: str):
                 # Apply the new learning rate to the optimizer
                 optimizer.learning_rate = new_lr
         
-            # Average the accumulated gradients and loss
-            avg_grads = {k: v / num_micro_batches for k, v in accumulated_grads.items()}
-            avg_loss = total_loss / num_micro_batches
+            # Average the accumulated gradients and loss over the batch
+            avg_batch_grads = {k: v / batch_num_micro_batches for k, v in batch_accumulated_grads.items()}
+            avg_batch_loss = batch_total_loss / batch_num_micro_batches
 
-            grad_values = list(avg_grads.values())
+            grad_values = list(avg_batch_grads.values())
             clipped_grad_values, _ = optim.clip_grad_norm(grad_values, config.grpo.clip_epsilon)
-            clipped_grads_dict = dict(zip(avg_grads.keys(), clipped_grad_values))
+            clipped_grads_dict = dict(zip(avg_batch_grads.keys(), clipped_grad_values))
             
             updated_params = optimizer.apply_gradients(clipped_grads_dict, trainable_params)
             policy_model.update(tree_unflatten(list(updated_params.items())))
             trainable_params = updated_params
             mx.eval(policy_model.parameters(), optimizer.state)
-        else:
-            avg_loss = -1.0
 
-        train_record = log_game_result(step_counter, avg_loss, game_rollout, 'train')
+            # Reset batch accumulators
+            batch_accumulated_grads = {k: mx.zeros_like(v) for k, v in trainable_params.items()}
+            batch_total_loss = 0.0
+            batch_num_micro_batches = 0
+
+            logged_loss = avg_batch_loss
+
+        train_record = log_game_result(step_counter, logged_loss, game_rollout, 'train')
         training_game_outcomes.append(train_record)
         gc.collect()
 
         pbar.set_postfix({
-            "loss": f"{avg_loss:.3f}", 
+            "loss": f"{avg_rollout_loss:.3f}",
             "reward": f"{avg_reward_this_step:.2f}",
             "win%": f"{rolling_win_rate:.1f}\n"
         })
@@ -585,6 +606,29 @@ def train(config: cfg.TrainerConfig, system_prompt: str):
                 eval_win_rates.append(win_rate)
             log_metrics_to_tensorboard(writer, eval_game_outcomes, step_counter, 'eval')
             write_metrics_to_file(eval_game_outcomes, metrics_file_path)
+
+        # Periodically update the reference model with the policy model's weights
+        if step_counter > 0 and step_counter % config.grpo.ref_update_steps == 0:
+            print(f"\n--- Updating reference model at step {step_counter} ---")
+
+            # Create a new model to serve as the temporary fused model
+            fused_model, _ = load(config.model.name)
+            fused_model = lora.apply_lora_to_model(fused_model, config.lora)
+
+            # Copy the trained LoRA weights from the policy model to the temp model
+            fused_model.update(policy_model.parameters())
+
+            # Fuse the LoRA layers
+            lora.fuse_model(fused_model)
+
+            # Update the reference model with the fused weights
+            ref_model.update(fused_model.parameters())
+            mx.eval(ref_model.parameters())
+
+            # Clean up the temporary model
+            del fused_model
+            gc.collect()
+            print("--- Reference model updated successfully ---")
 
         # Checkpointing
         if step_counter > 0 and step_counter % config.training.checkpoint_steps == 0:

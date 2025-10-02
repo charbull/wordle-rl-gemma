@@ -34,20 +34,26 @@ class GuessFeedback:
 @dataclass
 class GenerationAttempt:
     """Stores all information related to a single model generation attempt in a game."""
-    prompt_string: str
-    prompt_tokens: list
     full_response: str
-    response_tokens: list
+    response_tokens: List[int]
     parsed_guess: str
-    feedback_given: GuessFeedback
+    feedback_given: Optional[GuessFeedback]
     game_score: float # The score based only on the guess quality
     training_reward: float # The final reward for the RL trainer
 
 
 @dataclass
+class TurnRollout:
+    """Contains the prompt and all generation attempts for a single turn."""
+    prompt_string: str
+    prompt_tokens: List[int]
+    attempts: List[GenerationAttempt] = field(default_factory=list)
+
+
+@dataclass
 class GameRollout:
     """Contains the full history and outcome of one played game."""
-    attempts: List[GenerationAttempt] = field(default_factory=list)
+    turns: List[TurnRollout] = field(default_factory=list)
     secret_word: str = ""
     solved: bool = False
 
@@ -426,6 +432,11 @@ def play_wordle_game(
             messages, tokenize=False, add_generation_prompt=True)
         prompt_tokens = tokenizer.encode(prompt_string)
 
+        current_turn_rollout = TurnRollout(
+            prompt_string=prompt_string,
+            prompt_tokens=prompt_tokens
+        )
+
         # Generate N parallel responses from the current state of the model.
         # TODO: Consider batching these generations when MLX supports it.
         generations = [
@@ -436,7 +447,6 @@ def play_wordle_game(
         ]
 
         # Process each generation to extract the guess and calculate the reward.
-        current_turn_attempts: List[GenerationAttempt] = []
         for i, response in enumerate(generations):
             response_only = response.replace(prompt_string, "").strip()
             guess = parse_guess(response_only)
@@ -456,8 +466,6 @@ def play_wordle_game(
                     print(f"    Training Reward: {training_reward:.2f}")
 
             attempt = GenerationAttempt(
-                    prompt_string=prompt_string,
-                    prompt_tokens=prompt_tokens,
                     full_response=response_only,
                     response_tokens=tokenizer.encode(response_only),
                     parsed_guess=guess,
@@ -465,11 +473,11 @@ def play_wordle_game(
                     training_reward=training_reward,
                     feedback_given=None
                 )
-            current_turn_attempts.append(attempt)
+            current_turn_rollout.attempts.append(attempt)
             
         # Filter for only valid, attempts to advance the game state.
         valid_candidates = [
-            att for att in current_turn_attempts
+            att for att in current_turn_rollout.attempts
             if att.parsed_guess and \
             att.parsed_guess not in already_guessed_words
             # TODO: Consider if we want to penalize words not in the dictionary to make it more strict
@@ -480,7 +488,7 @@ def play_wordle_game(
         if not valid_candidates:
             print("No valid, new guesses were generated this turn. Ending game early.")
             # Still add all the failed attempts for the trainer to learn from.
-            game_rollout.attempts.extend(current_turn_attempts)
+            game_rollout.turns.append(current_turn_rollout)
             break
 
         # Select the best candidate from the valid ones to advance the game state
@@ -510,7 +518,7 @@ def play_wordle_game(
         # Store the results
         best_attempt.feedback_given = feedback
         # Add all attempts (including failed ones) to the rollout for the trainer.
-        game_rollout.attempts.extend(current_turn_attempts)
+        game_rollout.turns.append(current_turn_rollout)
         # Add only the feedback from the best valid path to guide the next turn.
         past_feedback.append(feedback)
 
@@ -523,22 +531,10 @@ def play_wordle_game(
     if not game_rollout.solved:
         if print_debug and reward_fn:
             print(f"❌ Did not guess '{secret_word.upper()}' in {max_trials} trials. Turn-by-turn breakdown:")
-
-            from collections import defaultdict
-            # Group all generated attempts by their prompt, which represents a single turn.
-            grouped_by_turn = defaultdict(list)
-            for attempt in game_rollout.attempts:
-                grouped_by_turn[attempt.prompt_string].append(attempt)
             
-            # Ensure we process turns in the order they were played
-            turn_prompts = sorted(
-                grouped_by_turn.keys(), 
-                key=lambda p: game_rollout.attempts.index(grouped_by_turn[p][0])
-            )
-
             # Iterate through each turn and print the winner/loser summary
-            for i, prompt in enumerate(turn_prompts):
-                attempts_for_turn = grouped_by_turn[prompt]
+            for i, turn in enumerate(game_rollout.turns):
+                attempts_for_turn = turn.attempts
                 if not attempts_for_turn:
                     continue
 
@@ -611,7 +607,7 @@ def play_eval_game(
     )
     
     if game_rollout.solved:
-        turns = len(game_rollout.attempts)
+        turns = len(game_rollout.turns)
     else:
         turns = config.rl.max_trials # If not solved, it used all turns
     

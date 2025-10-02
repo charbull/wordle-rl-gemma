@@ -221,6 +221,24 @@ def apply_lora_to_model(model: nn.Module, lora_config: cfg.LoRAConfig)-> nn.Modu
     )
     return model
 
+
+def fuse_model(model: nn.Module):
+    """
+    Fuses the LoRA layers of a model. This function modifies the model in-place,
+    replacing LoRALinear layers with their fused nn.Linear counterparts.
+    """
+    layers = find_transformer_layers(model)
+    for l in layers:
+        if hasattr(l.self_attn, "q_proj") and isinstance(l.self_attn.q_proj, LoRALinear):
+            l.self_attn.q_proj = l.self_attn.q_proj.to_linear()
+        if hasattr(l.self_attn, "k_proj") and isinstance(l.self_attn.k_proj, LoRALinear):
+            l.self_attn.k_proj = l.self_attn.k_proj.to_linear()
+        if hasattr(l.self_attn, "v_proj") and isinstance(l.self_attn.v_proj, LoRALinear):
+            l.self_attn.v_proj = l.self_attn.v_proj.to_linear()
+        if hasattr(l.self_attn, "o_proj") and isinstance(l.self_attn.o_proj, LoRALinear):
+            l.self_attn.o_proj = l.self_attn.o_proj.to_linear()
+
+
 def get_named_parameters_flat(model_params: dict, prefix: str = ''):
     """
     A helper function to recursively flatten a nested structure of parameters
