@@ -23,7 +23,7 @@ intended for use in a production environment.
 - [Key Lessons Learned](#key-lessons-learned)
 - [Further Reading](#further-reading)
 
-
+![Gemma RL LoRA](./docs/gemma_rl.png)
 
 ## Why Wordle? The RL Challenge
 
