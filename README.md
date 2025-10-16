@@ -237,10 +237,13 @@ Providing the model with previous turns gives it crucial context, leading to a d
 *   **Temperature = 0.1 (More Deterministic)**: The trained model's choices are more focused, leading to a consistent and significant performance gain over the base model.
     ![Cumulative Wins with History, Temp 0.1](./docs/plots/cumulative_wins_sxs_lora_base_150_games_with_history_temp01.png)
     ![Win Comparison with History, Temp 0.1](./docs/plots/model_comparison_wins_num_games_145_with_history_temp01.png)
+    ![Win distribution with History, Temp 0.1](./docs/plots/win_distribution_sxs_lora_base_150_games_with_history_temp01.png)
+
 
 *   **Temperature = 0.9 (More Creative)**: With higher temperature, the model's guesses are more random. While it still outperforms the base model, its win rate is lower and less consistent compared to the low-temperature setting.
     ![Cumulative Wins with History, Temp 0.9](./docs/plots/cumulative_wins_sxs_lora_base_150_games_with_history_temp_09.png)
     ![Win Comparison with History, Temp 0.9](./docs/plots/model_comparison_wins_num_games_145_with_history_temp_09.png)
+    ![Win distribution with History, Temp 0.9](./docs/plots/win_distribution_sxs_lora_base_150_games_with_history_temp_09.png)
 
 
 #### Without Game History (Starting from Turn 1)
@@ -249,10 +252,13 @@ When starting from scratch, the model's performance drops significantly, highlig
 *   **Temperature = 0.1**: The LoRA model still shows a slight edge, but the performance for both models is much lower.
     ![Cumulative Wins without History, Temp 0.1](./docs/plots/cumulative_wins_sxs_lora_base_150_games_without_history_temp01.png)
     ![Win Comparison without History, Temp 0.1](./docs/plots/model_comparison_wins_num_games_145_without_history_temp01.png)
+    ![Win distribution without History, Temp 0.1](./docs/plots/win_distribution_sxs_lora_base_150_games_without_history_temp01.png)
 
 *   **Temperature = 0.9**: At high temperature and with no history, the strategic advantage is nearly lost, and performance is poor for both models.
     ![Cumulative Wins without History, Temp 0.9](./docs/plots/cumulative_wins_sxs_lora_base_150_games_without_history_temp09.png)
     ![Win Comparison without History, Temp 0.9](./docs/plots/model_comparison_wins_num_games_145_without_history_temp09.png)
+    ![Win distribution without History, Temp 0.9](./docs/plots/win_distribution_sxs_lora_base_150_games_without_history_temp09.png)
+
 
 ### Analysis and Key Findings
 1.  **Game History is Crucial**: The model's primary strength is using constraints from previous turns. Its performance is dramatically better when it has context to work with.
