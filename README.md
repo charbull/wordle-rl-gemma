@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-This project is an exploration into training a Large Language Model (**Gemma-3 4B-it**) to play the game of Wordle using Reinforcement Learning (RL) with LoRA. The entire training and inference pipeline is optimized to run locally on Apple Silicon using the [MLX framework](https://ml-explore.github.io/mlx/build/html/index.html).
+This project is an exploration into training a Large Language Model (**Gemma-3 4B-it**) or similar (Qwen, SmolLM) to play the game of Wordle using Reinforcement Learning (RL) with LoRA. The entire training and inference pipeline is optimized to run locally on Apple Silicon using the [MLX framework](https://ml-explore.github.io/mlx/build/html/index.html).
 
 The primary goals were to gain hands-on experience with RL, understand the challenges and hardware constraints of local training, and compare RL techniques to traditional Supervised Fine-Tuning (SFT).
 
@@ -12,6 +12,8 @@ Program](https://bughunters.google.com/open-source-security).
 
 This project is intended for demonstration purposes only. It is not
 intended for use in a production environment.
+
+Slides version is available here: [teaching llm to play wordle with RL (on Apple Silicon)](https://docs.google.com/presentation/d/14v3AwptjfcqwI4lD8qWKdH2d7JSXBL5n1IPrbPbsP1Q/edit?usp=sharing)
 
 ## Table of Contents
 - [Why Wordle? The RL Challenge](#why-wordle-the-rl-challenge)
